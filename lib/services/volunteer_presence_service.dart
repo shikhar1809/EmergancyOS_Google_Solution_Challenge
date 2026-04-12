@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
@@ -34,6 +35,18 @@ class VolunteerPresenceService {
   VolunteerPresenceService._();
 
   static final _db = FirebaseFirestore.instance;
+  // FIX 6: Track volunteer duty state and lifecycle registration for immediate offline marking.
+  static bool _lifecycleRegistered = false;
+  static bool _currentlyOnDuty = false;
+
+  /// Register the app lifecycle observer once at startup (call from app_bootstrap.dart).
+  /// When the app backgrounds or is closed, volunteer availability is immediately
+  /// written to Firestore rather than waiting for the heartbeat TTL to expire.
+  static void initLifecycleObserver() {
+    if (_lifecycleRegistered) return;
+    _lifecycleRegistered = true;
+    WidgetsBinding.instance.addObserver(_LifecycleObserver());
+  }
 
   /// Default radius for “nearby” (meters); align with map grid scan when possible.
   static const double defaultNearbyRadiusM = 25000;
@@ -81,6 +94,8 @@ class VolunteerPresenceService {
   static Future<void> publishDutyPresence({required bool onDuty}) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || uid.isEmpty) return;
+    // FIX 6: Track duty state so lifecycle observer can restore it on resume.
+    _currentlyOnDuty = onDuty;
 
     if (!onDuty) {
       try {
@@ -183,5 +198,41 @@ class VolunteerPresenceService {
       if (email.contains(hint)) return 'female';
     }
     return '';
+  }
+}
+
+/// FIX 6: Lifecycle observer that immediately clears volunteer availability
+/// when the app goes to background, is paused, or is detached/closed.
+/// Re-broadcasts presence when the app resumes if the volunteer was on duty.
+class _LifecycleObserver with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      _markOfflineImmediate();
+    } else if (state == AppLifecycleState.resumed) {
+      if (VolunteerPresenceService._currentlyOnDuty) {
+        VolunteerPresenceService.publishDutyPresence(onDuty: true);
+      }
+    }
+  }
+
+  Future<void> _markOfflineImmediate() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.isEmpty) return;
+    try {
+      await VolunteerPresenceService._db.collection('users').doc(uid).set(
+        {
+          'volunteerOnDuty': false,
+          'dutyUpdatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+      debugPrint('[VolunteerPresence] Lifecycle: marked offline immediately.');
+    } catch (e) {
+      debugPrint('[VolunteerPresence] Lifecycle offline mark failed: $e');
+    }
   }
 }

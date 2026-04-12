@@ -28,6 +28,7 @@ import 'services/leaderboard_service.dart';
 import 'services/offline_cache_service.dart';
 import 'services/ops_hospital_service.dart';
 import 'services/voice_comms_service.dart';
+import 'services/volunteer_presence_service.dart';
 
 Future<void> bootstrapEmergencyOS(AppVariant variant) async {
   try {
@@ -66,6 +67,10 @@ Future<void> bootstrapEmergencyOS(AppVariant variant) async {
     );
 
     await OfflineCacheService.init();
+
+    // FIX 6: Register lifecycle observer to immediately clear volunteer availability
+    // when the app backgrounds, ensuring no ghost-volunteer dispatches occur.
+    VolunteerPresenceService.initLifecycleObserver();
 
     // So first web TTS (readAloudImmediate) uses app language, not default en.
     await VoiceCommsService.getLocale();
