@@ -1,655 +1,586 @@
 <div align="center">
 
-<br/>
+<img src="logo.png" alt="EmergencyOS Logo" width="120" />
 
-<img src="assets/images/logo.png" alt="EmergencyOS Logo" width="120" height="120"/>
+# EmergencyOS
 
-<br/>
+### AI-Powered Emergency Response Platform
 
-### *Designed to Save Lives.*
+**Google Solution Challenge 2026 · Open Track · Rapid Emergency Response**
 
-<br/>
-
-[![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
-[![Firebase](https://img.shields.io/badge/Firebase-Powered-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com)
-[![Gemini AI](https://img.shields.io/badge/Gemini-AI_Triage-8E75B2?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev)
-[![Google Maps](https://img.shields.io/badge/Google_Maps-Platform-4285F4?style=for-the-badge&logo=googlemaps&logoColor=white)](https://developers.google.com/maps)
-[![LiveKit](https://img.shields.io/badge/LiveKit-Voice_Bridge-FF4F00?style=for-the-badge)](https://livekit.io)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
-
-<br/>
-
-**By Shikhar Shahi (Afterburners) · Google Solution Challenge 2026**
-
-<br/>
-
----
+[![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter)](https://flutter.dev)
+[![Firebase](https://img.shields.io/badge/Firebase-Platform-FFCA28?logo=firebase)](https://firebase.google.com)
+[![Gemini](https://img.shields.io/badge/Gemini_2.5_Flash-AI-4285F4?logo=google)](https://ai.google.dev)
+[![LiveKit](https://img.shields.io/badge/LiveKit-WebRTC-0F0?logo=webrtc)](https://livekit.io)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 </div>
 
-<br/>
+---
 
-## 💔 Why This Exists — A Personal Story
+## Why EmergencyOS?
 
-> *This is not a hackathon project. This is a response to a night I never want anyone else to live through.*
-
-It was 2 AM. My mother collapsed.
-
-I called the ambulance. It came — eventually. But there was no way to know where it was. No tracking, no ETA, no updates. We stood outside in the dark, not knowing if help was 2 minutes or 20 minutes away. Every second felt like a verdict.
-
-When the ambulance finally arrived, we rushed to the nearest hospital. The doctor looked at her and said the words I wasn't prepared for:
-
-**"We don't have a cardiologist available right now. You need to go to another hospital."**
-
-We didn't know which hospital had a cardiologist. We didn't know which one had an open ICU bed. Nobody did. We just drove — fast, scared, and completely blind. We switched hospitals twice that night, each transfer burning precious minutes we didn't have.
-
-My mother survived. By grace. Not by system.
-
-That night I asked myself a question I couldn't stop thinking about: **What if there was a system that knew?** What if the ambulance was trackable? What if the hospital knew she was coming before she arrived? What if a CPR-certified volunteer nearby had reached her in those first 8 minutes while the ambulance was in traffic?
-
-EmergencyOS is my answer.
+> *"My mom suffered a heart attack while nobody was home. I called 112 for an ambulance — no tracking, no ETA. It never came. We rushed her ourselves to the nearest hospital, but they couldn't treat her: the on-call specialist wasn't available. We had to shift her again — precious golden-hour minutes burning away. When the doctor finally saw her, he had to waste more time digging through handwritten files just to know her medication history.*
+>
+> *By God's grace, my mom survived. But that day I witnessed a gap no family should have to fall into — no real-time visibility, no intelligent dispatch, no hospital routing, no medical history at the point of care.*
+>
+> **That day, EmergencyOS was born.**"
+>
+> — **Shikhar Shahi**, Builder & Founder
 
 ---
 
-<br/>
+## The Problem
 
-## 🚨 The Scale of the Problem in India
+Every minute in a medical emergency counts — the first 60 minutes are called the **Golden Hour**. In India and across the developing world, that window is routinely lost to:
 
-India has one of the world's largest populations and one of the most fragmented emergency response systems. The numbers are not statistics — they are people.
+| Gap | Impact |
+|-----|--------|
+| 🚑 No ambulance ETA or tracking | Victims wait blind, family panics |
+| 🏥 Wrong hospital routing | No bed, wrong specialty, forced re-transfer |
+| 📋 No patient history at bedside | Doctors repeat diagnostics from scratch |
+| 📵 Offline victims can't call for help | SMS-only path abandoned |
+| 👨‍⚕️ No bystander guidance | Untrained witnesses freeze or worsen outcomes |
+| 🤝 Volunteers exist but are unreachable | Trained responders nearby go unalerted |
 
-| Metric | Data |
-|--------|------|
-| 🏥 Average emergency response time in Indian cities | **8–15 minutes** |
-| ❤️ Brain death begins during cardiac arrest | **4–6 minutes** |
-| 🚑 Ambulance availability per 100,000 people | **~2 units** (WHO recommends 16) |
-| 📱 Out-of-hospital cardiac arrest survival (India) | **< 5%** |
-| 🏙️ Urban population without structured emergency access | **400+ million** |
-| 📞 108 call-to-dispatch time (average) | **3–7 minutes** before movement |
-| 🏨 Hospitals with real-time bed capacity systems | **< 8%** |
-
-> Sources: WHO, ICMR, National Ambulance Code Report 2023, Lancet India Emergency Study 2022
-
-### The 5 Problems EmergencyOS Was Built to Solve
-
-**1. 🏥 Hospitals are blind when patients arrive**
-Doctors have zero information about incoming patients until they physically arrive — no injury type, no severity, no triage data. Preparation time is zero. EmergencyOS transmits real-time incident data to the receiving hospital the moment ambulance dispatch is confirmed.
-
-**2. 🗺️ People don't know which hospital to go to**
-No live system shows ICU availability, specialist presence, or capacity. Families make life-or-death decisions based on proximity, not capability. EmergencyOS dispatches to the *right* hospital based on real-time bed data, distance, and required specialty.
-
-**3. 🚑 Ambulances are invisible**
-Once you call an ambulance, you lose all contact. No tracking, no ETA, no updates. Panic fills the vacuum. EmergencyOS gives drivers a live GPS sharing console — position and ETA are visible to the command center in real time.
-
-**4. 🙋 Volunteers arrive uninformed**
-CPR-certified bystanders and off-duty paramedics are willing to help — but they arrive blind. EmergencyOS briefs accepted volunteers in real-time with full triage data — emergency type, victim count, consciousness and breathing status — before they reach the scene.
-
-**5. 📵 Infrastructure fails exactly when you need it most**
-Network congestion during disasters, floods, earthquakes. Most emergency apps fail silently. EmergencyOS is built with layered fallbacks so it keeps working when the network doesn't.
+EmergencyOS is a full-stack operating system for emergency response that closes every one of these gaps.
 
 ---
 
-<br/>
+## What EmergencyOS Does
 
-## 🏗️ System Architecture
+EmergencyOS connects **six roles** — victim, citizen volunteer, EMS fleet operator, hospital, ops admin, and emergency contact — into one real-time command mesh powered by Gemini AI, Google Maps, LiveKit WebRTC, and Firebase.
 
-```mermaid
-graph TB
-    subgraph Citizens["👤 Citizens & Volunteers"]
-        A[Flutter Mobile/Web App]
-    end
-
-    subgraph GoogleCloud["☁️ Google Cloud + Firebase"]
-        B[Firebase Auth]
-        C[Cloud Firestore]
-        D[Firebase Cloud Functions]
-        E[Firebase Messaging FCM]
-        F[Firebase Storage]
-        G[Firebase App Check]
-        H[Firebase Crashlytics]
-    end
-
-    subgraph AI["🤖 AI Layer"]
-        I[Gemini 2.0 Flash — Triage & Chat]
-        K[Gemma 4 — On-device Fallback]
-    end
-
-    subgraph Maps["🗺️ Maps Platform"]
-        L[Google Maps SDK]
-        M[OSRM Route Engine]
-    end
-
-    subgraph Comms["📡 Real-Time Comms"]
-        N[LiveKit — Voice Bridge]
-        O[PTT Firebase Fallback]
-        P[GeoSMS Gateway]
-    end
-
-    subgraph Consoles["🖥️ Ops Consoles"]
-        Q[Master Command Center]
-        R[Hospital Live Ops — Medical Role]
-        S[Ambulance Driver Panel]
-    end
-
-    A -->|Auth| B
-    A -->|Incidents + State| C
-    A -->|Push Alerts| E
-    A -->|AI Triage| D
-    D -->|Invoke| I
-    D -->|Invoke| K
-    D -->|Write| C
-    C -->|Realtime Stream| Q
-    C -->|Realtime Stream| R
-    Q -->|Dispatch| S
-    A -->|Maps & Routes| L
-    L -->|Drive routing| M
-    A -->|Voice| N
-    A -->|Offline Voice| O
-    A -->|Offline SOS| P
-    P -->|Webhook| D
+```
+Victim taps SOS
+      │
+      ▼
+Cloud Function (dispatchSOS)
+  ├─ Hex-grid hospital selection (Gemini scores + distance + specialty + beds)
+  ├─ FCM Layer 1: Geo-alert all volunteers within 20 km
+  ├─ FCM Layer 2: Topic broadcast to all subscribed devices
+  ├─ FCM Layer 3: All-user fallback multicast
+  └─ SMS GeoSMS relay (Twilio) — offline phones still trigger dispatch
+      │
+      ▼
+Volunteers race to scene → LIFELINE AI guides CPR, bleeding, burns by voice
+EMS Fleet accepts assignment → real-time tracking on victim's screen
+Hospital accepts 2-minute dispatch window → or auto-escalates to next bed
+Ops Admin watches hex-grid command center → Gemini scene brief every 5 min
+Emergency Contact receives SMS updates (ETA, volunteer accepted, status)
 ```
 
 ---
 
-<br/>
-
-## 📱 Feature Breakdown
-
-### 🆘 1. One-Touch SOS with Smart Intake
-
-The fastest path from panic to help.
-
-- **5-second countdown overlay** with cancel option — prevents false triggers, each second bolded and animated
-- **10 emergency type categories** — cardiac, stroke, bleeding, choking, seizure, and more — each mapped to required hospital services for smart dispatch
-- **Victim status questions** — conscious? breathing? for someone else? — feeds directly into triage priority
-- **Locale-aware emergency number** — automatically shows 112, 108, or 911 based on device region
-- **Guest mode SOS** — triggers an incident without login
-- **Parallel SMS firing** — GeoSMS sent simultaneously as Firestore write, even before confirmation
+## System Architecture
 
 ```
-Tap SOS → 5s Countdown → Select Emergency Type → 3 Triage Questions → Incident Created
-         ↓ immediately                                                        ↓ parallel
-   Call 112 offered                                                  GeoSMS dispatched
-```
-
----
-
-### 🤖 2. Lifeline — AI Emergency Guidance
-
-While the ambulance is in transit, EmergencyOS talks you through it.
-
-- Conversational AI powered by **Gemini 2.0 Flash** — called server-side via Cloud Functions, API key never exposed to client
-- Step-by-step intervention guidance: CPR, recovery position, bleeding control, choking response
-- **Emergency mode** — structured, panic-readable responses with large text and reduced complexity
-- **Triage image analysis** — responders can photograph the scene; Gemini analyzes for severity assessment
-- **Rate-limited per user** — enforced at Cloud Function level, invisible to the caller
-- **Model routing** — master ops can switch inference from Gemini → Gemma 4 via `ops_integration_routing` flag without a code deploy
-
----
-
-### 🗺️ 3. Real-Time Incident Map
-
-Every active incident plotted, tracked, and updated live.
-
-- **Live victim location** pinned from GPS at SOS creation, updated as incident progresses
-- **Volunteer live positions** — on-duty volunteers stream their location; shown on command map
-- **Ambulance live tracking** — fleet operator streams GPS every 5 seconds; speed, heading, and ETA to victim computed in real-time via OSRM
-- **Hospital overlay** — nearest hospitals with bed capacity, assigned hospital highlighted on map
-- **Coverage zone mesh** — `ops_coverage_zones` hex cells define dispatch boundaries and hospital service areas
-
----
-
-### 🙋 4. Volunteer First-Responder Network
-
-A CPR-trained community layer that reaches the scene before the ambulance does.
-
-- **CPR/AED certification pipeline** — volunteers upload credentials via Firebase Storage; master console verifies
-- **Readiness score system** — each volunteer carries a live readiness score (0–100) based on: certification status, on-duty activity, incident history, response acceptance rate
-- **On-duty toggle** — volunteers mark themselves available; only active volunteers receive FCM dispatch alerts
-- **Pre-scene triage brief** — accepted volunteers immediately receive emergency type, victim count, consciousness and breathing status
-- **Scene report submission** — volunteers submit structured on-scene reports including photo for Gemini-assisted severity analysis
-- **XP and leaderboard** — experience points, lives-saved counter, Lifeline levels, full leaderboard
-- **Volunteer ban system** — master operators can restrict and flag bad actors
-
----
-
-### 🏥 5. Hospital Live Ops Console
-
-Hospitals see patients before they arrive.
-
-- **Incoming incident feed** — assigned incidents stream to hospital console in real-time via Firestore
-- **Bed capacity management** — ICU beds, ORs, and specialist availability updated live
-- **Ambulance ETA** — live fleet position and OSRM-computed ETA visible to hospital staff
-- **ER Handoff Sessions** — structured patient handoff workflow between dispatch and receiving ER
-- **Blood bank integration** — `ops_blood_banks` tracks blood type availability per hospital
-- **Auto hospital assignment** — Cloud Function dispatch engine selects nearest capable hospital based on incident type, required services, and current bed capacity
-
----
-
-### 🖥️ 6. Master Command Center
-
-The neural center for city-wide medical emergency coordination.
-
-- **Live incident map** — all active SOS incidents, volunteer positions, ambulance positions, and assigned hospitals on one map
-- **Ambulance fleet management** — track all active ambulance units with live GPS, speed, heading, and dispatch status
-- **Manual dispatch controls** — override AI hospital assignment, reassign ambulances, push ETA updates
-- **Volunteer management** — view on-duty volunteers, review certifications, manage XP, readiness scores, and bans
-- **Hospital grid** — all ops hospitals with live bed counts, capacity indicators, and contact status
-- **Analytics dashboard** — real-time incident heatmaps, response time trends, unit utilization
-- **AI Insights screen** — Gemini-powered operational intelligence: trend analysis, anomaly flags, recommended actions
-- **System Observatory** — connectivity probe results, integration routing flags, live error rates, model health
-- **Drill Mode** — simulate a full incident lifecycle (SOS → dispatch → volunteer → hospital) without triggering real alerts
-
----
-
-### 🚑 7. Ambulance Operator Console
-
-The driver-facing real-time dispatch interface.
-
-- **Fleet gate login** — call sign + password verified against `ops_fleet_accounts` in Firestore
-- **On-duty toggle** — transitions unit from standby to active; GPS heartbeat begins every 5 seconds
-- **Push dispatch notifications** — FCM alert when an incident is assigned; driver can accept or reject
-- **Live route to victim** — OSRM driving route rendered on map; recalculates as driver moves
-- **Volunteer route overlay** — driver can see the volunteer's route to scene for coordination
-- **GPS streaming** — position, heading, and speed streamed to `ops_fleet_units`; ETA computed against victim location
-- **ER handoff initiation** — driver triggers hospital handoff session on scene arrival
-
----
-
-### 📡 8. Voice Bridge (LiveKit + PTT Fallback)
-
-Real-time voice between all incident participants.
-
-- **LiveKit WebRTC** — low-latency, encrypted voice between victim, volunteer, and command center
-- **Push-to-Talk fallback** — full Firebase PTT relay when LiveKit is unavailable; zero degradation
-- **Mic arbitration** — intelligent pausing when STT is active, preventing audio conflicts
-- **Role-gated rooms** — LiveKit room tokens issued only to verified incident participants, server-side
-
----
-
-### 📵 9. Offline & Reliability Architecture
-
-EmergencyOS is engineered to keep working when everything else fails.
-
-- **Firestore offline persistence** — all Firestore reads are cached; app remains functional without network
-- **GeoSMS Gateway** — on SOS trigger, an SMS with Open GeoSMS payload (location, type, victim count) fires in parallel. If the device has no data but has cell signal, the SMS reaches a Cloud Function webhook that creates the Firestore incident remotely
-- **Local SOS cache** — `OfflineSosStatusService` persists the active SOS to device storage; on reconnect, syncs or merges with any existing incident created via SMS
-- **Offline map packs** — map tile caching for known operational zones
-- **Offline knowledge base** — `OfflineKnowledgeService` caches CPR and emergency guidance for Lifeline to serve without an AI connection
-- **PTT text relay** — when LiveKit is unavailable, PTT degrades gracefully to Firebase Firestore text relay
-
----
-
-<br/>
-
-## 🔄 User Flow Diagrams
-
-### Citizen SOS Flow
-
-```mermaid
-flowchart TD
-    A([User Opens App]) --> B{Logged In?}
-    B -- No --> C[Guest Mode or Login]
-    B -- Yes --> D[Dashboard]
-    C --> D
-    D --> E[Tap SOS Button]
-    E --> F[5-Second Countdown\n+ Call 112 offered]
-    F -- Cancel --> D
-    F -- Confirm or Auto-fires --> G[Quick Intake Form]
-    G --> G1[Select Emergency Type]
-    G1 --> G2[For Yourself or Someone Else?]
-    G2 -- Someone Else --> G3[Conscious? Breathing?]
-    G2 -- Self --> G4[People Affected Count]
-    G3 --> G4
-    G4 --> H{Online?}
-    H -- Yes --> I[Firestore Incident Created\nGPS + Type + Triage]
-    H -- No --> J[Local Cache\n+ GeoSMS Gateway]
-    I --> K[SOS Active Screen]
-    J --> K
-    K --> L[Live Map: Victim Pin\n+ Volunteer Positions]
-    K --> M[Lifeline AI Chat\nStep-by-step guidance]
-    K --> N[Voice Bridge\nLiveKit or PTT]
-    K --> O{Volunteer Accepted?}
-    O -- Yes --> P[Track Volunteer ETA]
-    K --> Q{Hospital Assigned?}
-    Q -- Yes --> R[Hospital Prep Notified]
-    P --> S[Responder On-Scene]
-    S --> T[Incident Resolved]
-    T --> U[Post-Incident Feedback]
+┌─────────────────────────────────────────────────────────────────┐
+│                       CLIENT LAYER                              │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌────────────────┐  │
+│  │  EmergencyOS App │ │  Admin Ops       │ │  Fleet Panel   │  │
+│  │  (Flutter)       │ │  Console (Web)   │ │  (Web)         │  │
+│  │  Android/iOS/Web │ │  /ops-dashboard  │ │  /fleet        │  │
+│  └────────┬─────────┘ └────────┬─────────┘ └───────┬────────┘  │
+└───────────┼─────────────────────┼────────────────────┼──────────┘
+            │                     │                    │
+┌───────────▼─────────────────────▼────────────────────▼──────────┐
+│                    FIREBASE BACKEND                              │
+│  ┌──────────────┐  ┌─────────────────────────────────────────┐  │
+│  │ Firebase     │  │         Cloud Firestore                 │  │
+│  │ Auth         │  │  sos_incidents · ops_hospitals          │  │
+│  │ (Google,     │  │  leaderboard · users · volunteers       │  │
+│  │  Email, Anon)│  │  ptt_channels · ops_fleet_units         │  │
+│  └──────────────┘  │  ops_incident_hospital_assignments      │  │
+│  ┌──────────────┐  │  livekit_bridges · livekit_copilot     │  │
+│  │ FCM (3-layer)│  └─────────────────────────────────────────┘  │
+│  │ Firebase     │  ┌──────────────┐ ┌──────────────────────┐   │
+│  │ Storage      │  │ App Check    │ │ Crashlytics          │   │
+│  │ App Check    │  │ (reCAPTCHA   │ │ Performance          │   │
+│  │ Crashlytics  │  │  v3 / Play   │ │ Monitoring           │   │
+│  └──────────────┘  │  Integrity)  │ └──────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+            │
+┌───────────▼────────────────────────────────────────────────────┐
+│                  CLOUD FUNCTIONS (Node.js v2)                  │
+│  dispatchSOS · dispatchHospitalInHex · lifelineChat           │
+│  analyzeTriageImage · generateSituationBriefForIncident        │
+│  acceptHospitalDispatch · declineHospitalDispatch              │
+│  acceptAmbulanceDispatch · hospitalDispatchEscalation          │
+│  getLivekitToken · ensureEmergencyBridge · ensureCopilotAgent  │
+│  parseSmsGateway · onIncidentUpdate · expireStaleSosIncidents  │
+│  updateLeaderboardOnIncidentChange · onExternalIncidentTrigger │
+└──────┬──────────────────────┬────────────────────────┬─────────┘
+       │                      │                        │
+┌──────▼──────┐   ┌───────────▼──────────┐   ┌────────▼────────┐
+│ Gemini 2.5  │   │  LiveKit WebRTC      │   │  Twilio SMS     │
+│ Flash API   │   │  ┌────────────────┐  │   │  Gateway        │
+│ · Triage    │   │  │emergency_bridge│  │   │  · Victim ETA   │
+│   vision    │   │  │  _{incidentId} │  │   │  · Contact SMS  │
+│ · LIFELINE  │   │  ├────────────────┤  │   │  · Offline SOS  │
+│   chat      │   │  │copilot_{uid}   │  │   │    (GeoSMS)     │
+│ · Scene     │   │  ├────────────────┤  │   └─────────────────┘
+│   brief     │   │  │commsop_...     │  │
+│ · Analytics │   │  │commsem_...     │  │   ┌─────────────────┐
+│   AI        │   │  │comms_command   │  │   │ Google Maps     │
+└─────────────┘   │  └────────────────┘  │   │ Platform        │
+                  │  LifelineAgent (TS)  │   │ · Directions    │
+                  │  CopilotAgent (TS)   │   │ · Places        │
+                  │  OpenAI Realtime     │   │ · Geocoding     │
+                  └────────────────────── ┘   └─────────────────┘
 ```
 
 ---
 
-### Volunteer Dispatch Flow
+## Features
 
-```mermaid
-flowchart TD
-    A([Volunteer Opens App]) --> B[Toggle On-Duty]
-    B --> C{Nearby Incident?}
-    C -- Yes --> D[FCM Alert\nType + Distance]
-    D --> E[Incident Brief\nType, Victims, Triage Status]
-    E --> F{Accept?}
-    F -- No --> G[Next Available Volunteer Notified]
-    F -- Yes --> H[Navigate to Scene\nGoogle Maps]
-    H --> I[Live Triage Updates\nfrom Firestore Stream]
-    I --> J[Voice Bridge Active\nLiveKit or PTT]
-    J --> K[On-Scene]
-    K --> L[Submit Scene Report\nPhoto + Status]
-    L --> M{Ambulance En Route?}
-    M -- Yes --> N[Coordinate Handoff]
-    M -- No --> O[Continue with Lifeline Guidance]
-    N --> P[Resolved\nXP Awarded]
-    O --> P
-```
+### 🆘 1. One-Tap SOS Emergency Dispatch
+
+The core of EmergencyOS. A single tap triggers a multi-layered dispatch chain:
+
+- **GPS location** captured immediately
+- **Voice capture** to describe the emergency on low-connectivity networks
+- **AI triage intake** suggests emergency type and required services
+- **3-layer FCM push** alerts nearby volunteers simultaneously:
+  - Layer 1: Geo-targeted multicast to volunteers within 20 km
+  - Layer 2: FCM topic broadcast to all `sos_alerts` subscribers
+  - Layer 3: All-user token fallback (no alert is ever silently dropped)
+- **Anti-abuse rate limiting** — fail-open design (real emergencies are never blocked)
+- **SOS active locked screen** shows real-time ambulance ETA, tracking, and volunteer status
+
+### 🤖 2. LIFELINE — AI First-Aid Co-Pilot
+
+LIFELINE is an on-device and cloud AI guide for bystanders at an emergency scene:
+
+- **Chat mode**: Powered by Gemini 2.5 Flash via Cloud Function — guides CPR, bleeding control, burns, shocks, strokes, seizures, allergic reactions, drowning, fractures
+- **Voice mode**: LiveKit WebRTC + OpenAI Realtime API (`coral` voice) with background noise cancellation
+- **Triage camera**: Gemini vision AI analyzes scene photos — returns incident type guess, victim condition, blood visible, hazard summary, confidence level
+- **Training arena**: 19-level first-aid curriculum with gamification (XP, levels, leaderboard)
+- **Emergency mode toggle**: Switches from training to live emergency guidance
+- **Offline fallback**: Local knowledge base serves guidance when cloud is unreachable
+- **Multilingual**: Responds in the user's selected language (12 Indian languages supported)
+
+### 🗺️ 3. Real-Time Emergency Map
+
+- Live incident map with **custom hex-grid zone markers** (flat-top axial coordinates, Lucknow ops center anchor)
+- Volunteer, EMS fleet, and hospital locations in real-time
+- **Nearest AED locator** with walk-time estimate
+- **Hazard zones** overlay (fires, floods, accidents)
+- Offline map pack for areas with poor connectivity
+- Google Maps + flutter_map dual rendering with WebGL fallback
+
+### 🏥 4. Intelligent Hospital Dispatch System
+
+The most technically sophisticated module — zero human operator required:
+
+1. On SOS creation, Cloud Function computes **hex-grid distance** from incident to all hospitals within 60 km
+2. Hospitals are scored by: hex ring distance + bed availability + specialty match + haversine km
+3. **Three dispatch tiers**: same hex (Tier 1) → rings 1–5 (Tier 2) → specialists beyond (Tier 3)
+4. Top hospital gets a **2-minute acceptance window** — decline or timeout escalates to next
+5. **Specialty bonus scoring**: cardiac hospitals preferred for heart attacks, trauma for RTA, burns for fires
+6. Accepted hospital triggers **ambulance fleet assignment** to the nearest available unit
+7. Ambulance operator gets a **3-minute response window** — escalates across hospital network if ignored
+8. All status changes (ETA, acceptance, en-route) push to victim via Firestore real-time + Twilio SMS
+9. **Ops dashboard alert feed** for every step: hospital notified, declined, exhausted, no beds
+
+### 👨‍🚒 5. Volunteer Response Network
+
+- Volunteers register availability with real-time GPS presence broadcasting
+- Geo-radius alert for all available volunteers within 20 km of incident
+- **Consignment screen** shows incident type, location, distance, victim name
+- Accepts/declines SOS assignments with one tap
+- On-scene volunteers submit **scene reports** (photos, video, victim count, hazards) that feed into Gemini situation brief
+- **On-scene check-in** marks volunteer physically present
+- **Post-incident feedback** drives XP, lives-saved counter, and leaderboard rank
+- **Elite volunteer tier**: Lifeline Level 10+ or 5 lives + 1000 XP → earns live voice channel access in emergency bridge
+- **PTT channel**: Push-to-talk voice mesh for all responders on an incident
+
+### 🚑 6. EMS Fleet Operations Panel
+
+Dedicated web panel (`/fleet`) for ambulance operators:
+
+- Incoming assignment queue with incident details, hospital name, ETA input
+- **Accept/decline** with 3-minute deadline — auto-expires with escalation
+- Real-time navigation link opens Google Maps turn-by-turn
+- **Fleet comms bridge**: Two dedicated LiveKit rooms per incident:
+  - `commsop_{id}` — Operation channel (hospital ↔ EMS coordination)
+  - `commsem_{id}` — Emergency channel (victim ↔ EMS voice)
+- Fleet unit heartbeat and availability status
+- `ops_fleet_units` collection tracks stationed hospital, vehicle type, call sign
+
+### 🏥 7. Hospital Bridge & Live Ops
+
+- Hospital staff receives dispatch notification (FCM push + Ops Alert)
+- **2-minute accept/decline** window via hospital dashboard
+- Hospital page shows: incident type, distance, required services vs capacity, bed count
+- **Live ops screen** gives hospital staff the full incident picture: victim details, EMS status, scene photos, Gemini situation brief
+- **Medical record upload**: pre-authorized hospital docs surface allergies, blood type, medications for incoming patient — zero time wasted at admission
+- **Comms bridge screen**: LiveKit Discord-style voice channels per incident
+- Hospital can accept/decline dispatch via `acceptHospitalDispatch` / `declineHospitalDispatch` Cloud Functions
+
+### 🎛️ 8. Admin Ops Command Center
+
+Full situational awareness for emergency operations administrators:
+
+- **Real-time hex-grid map**: All incidents plotted on axial hex overlay — color-coded by severity, zoom-dependent detail
+- **Incident command panel**: Focus any incident, see dispatch chain, hospital assignment, fleet status, volunteer roster
+- **Admin analytics dashboard**: Response time histogram, incident type breakdown, volunteer XP trends, zone heatmaps (fl_chart)
+- **Fleet management screen**: All units, availability TTL watch, stationed hospital, call sign assignment
+- **Volunteer management**: XP, level, lives saved, profile verification
+- **System observatory**: Live health check — Firestore, LiveKit, Twilio, Gemini API key status
+- **Impact dashboard**: Platform-level outcomes — lives helped, incidents resolved, average response time
+- **Ops dispatch note**: Admin can annotate any active incident for EMS and hospital briefings
+- **Master comms net**: `comms_command_net` LiveKit room — command-level voice on all incidents
+
+### 🗣️ 9. LIFELINE COPILOT — Voice AI Assistant
+
+A persistent per-user voice assistant powered by LiveKit + OpenAI Realtime:
+
+- Listens on `copilot_{uid}` LiveKit room — always on when user is in the app
+- Knows full medical protocols: CPR, choking, bleeding, burns, heart attack, stroke, seizure, anaphylaxis, drowning, fractures
+- Tool: `getAppPageContext` — tells copilot what screen the user is on
+- Tool: `getMedicalProtocol` — look up any protocol by name
+- Tool: `requestEmergencySos` — Copilot can request SOS trigger (user must confirm in-app)
+- Background noise cancellation via `@livekit/noise-cancellation-node`
+- Voice walkthrough mode for new users — hands-free app navigation coaching
+
+### 📡 10. SMS Offline Emergency Gateway
+
+For users with no app or internet (2G/USSD phones):
+
+- User sends a **GeoSMS** text to the gateway number (powered by Twilio webhook)
+- `parseSmsGateway` Cloud Function validates Twilio signature (anti-spoofing)
+- Parses coordinates, emergency type, victim count from GeoSMS URL format
+- Creates a Firestore incident → triggers full dispatch chain (hospital, volunteers, FCM)
+- If incident ID included → **merges SMS update onto existing in-app SOS** (parallel relay)
+- **Two-way SMS**: victim receives acknowledgment; ETA and status updates sent back automatically via `onIncidentUpdate`
+
+### 👨‍👩‍👧 11. Family Tracker
+
+- Share a **live tracking link** with family (`/family-tracker/{id}?t={token}`)
+- No app required — opens in browser, shows victim's live location + ETA updates
+- Emergency contact receives automatic SMS updates: volunteer accepted, ETA, medical status
+- Emergency contact can **join the voice bridge** via WebRTC after identity verification
+
+### 🏅 12. Volunteer Leaderboard & Gamification
+
+- XP awarded per incident response, scene report, on-scene check-in, CPR training completion
+- Leaderboard aggregated server-side by `updateLeaderboardOnIncidentChange` Cloud Function on incident archive
+- Public profile: display name + avatar synced from Firebase Auth
+- Training levels 1–19 in LIFELINE arena — each level unlocks new first-aid modules
+- **Elite tier**: Level 10+ earns `volunteer_elite` LiveKit grant — priority voice in emergency bridge
+
+### 📴 13. Full Offline Support
+
+- Firestore persistence enabled (50 MB cache)
+- `OfflineCacheService` pre-caches critical incident data
+- `OfflineKnowledgeService` serves 19-level first-aid curriculum without internet
+- `OfflineMapPackService` downloads map tiles for low-connectivity zones
+- `OfflineSosStatusService` queues SOS submissions for delivery when signal returns
+- Voice TTS reads guidance aloud when screen is unreadable
+
+### 🌐 14. Multi-Language Support (12 Indian Languages)
+
+App UI, LIFELINE responses, and TTS voice guidance available in:
+English · हिन्दी · தமிழ் · తెలుగు · ಕನ್ನಡ · മലയാളം · বাংলা · मराठी · ગુજરાતી · ਪੰਜਾਬੀ · ଓଡ଼ିଆ · اردو
+
+Gemini responds in the user's language when `replyLocale` is passed. TTS uses BCP-47 locale code for native speech synthesis.
+
+### 🎯 15. Emergency Drill Mode
+
+- Full simulation of SOS, volunteer response, dispatch chain — without impacting real incidents
+- Drill UI banner distinguishes practice from live operations
+- Drill route mirrors live routes (`/drill/dashboard`, `/drill/sos-intake`, `/drill/lifeline`)
+- Used for community preparedness training
 
 ---
 
-### Admin Command Center Flow
-
-```mermaid
-flowchart TD
-    A([Admin Opens /ops-dashboard]) --> B{Screen Width Check}
-    B -- Mobile lt 600dp --> C[Blocked: Desktop Only]
-    B -- Desktop or Tablet --> D{Session Active?}
-    D -- No --> E[Gate Login]
-    E --> F{Role?}
-    F -- Master --> G[Email + Password\nFirebase Auth]
-    F -- Hospital --> H[Hospital ID + Gate Password\nFirestore Verified]
-    G --> I[Master Console]
-    H --> J[Hospital Console]
-    I --> K[Overview: Live Incident Map\nAll SOS + Ambulance + Volunteer Positions]
-    K --> L[Management: Volunteers\nCertifications + XP + Bans]
-    L --> M[Systems: Integration Routing\nModel Switch + Health Observatory]
-    M --> N[Comms: LiveKit Channels\nAll Active Incidents]
-    N --> O[Analytics: Heatmaps\nResponse Time + Unit Utilization]
-    O --> P[AI Insights: Gemini Analysis\nOperational Intelligence]
-    J --> Q[Incident Feed: Assigned Incidents\nLive from Dispatch Engine]
-    Q --> R[Fleet: Ambulance Tracking\nLive Positions + OSRM ETA]
-    R --> S[Hospital Ops: Bed Counts\nBlood Bank + Specialists]
-    S --> T[Reports: Completed Incidents]
-    T --> U[Comms: PTT or LiveKit]
-```
-
----
-
-### Ambulance Driver Flow
-
-```mermaid
-flowchart TD
-    A([Driver Opens App]) --> B[Fleet Gate Login\nCall Sign + Password]
-    B --> C[Session Verified]
-    C --> D[Go On-Duty\nGPS heartbeat starts]
-    D --> E{Dispatch Received?}
-    E -- Yes --> F[FCM Alert\nIncident + Victim Location]
-    F --> G{Accept or Reject?}
-    G -- Reject --> H[Status: Unavailable\nNext unit notified]
-    G -- Accept --> I[Live Route to Victim\nOSRM driving route]
-    I --> J[Stream GPS Every 5s\nSpeed + Heading + ETA]
-    J --> K[On-Scene]
-    K --> L[Initiate ER Handoff\nHospital notified]
-    L --> M[Transport Patient]
-    M --> N[Incident Resolved\nStatus reset: Available]
-```
-
----
-
-<br/>
-
-## 📵 Offline & Reliability
-
-```mermaid
-flowchart TD
-    A([SOS Triggered]) --> B{Network?}
-
-    B -- Online --> C[Firestore Incident\nFull feature set]
-    C --> D[FCM to Volunteers]
-    C --> E[AI Triage]
-    C --> F[LiveKit Voice]
-    C --> G[Hospital Dispatch]
-
-    B -- Offline --> H[Local Cache\nOfflineSosStatusService]
-    H --> I[GeoSMS Fired in Parallel]
-    I --> J[SMS: GeoURL + Type + Count]
-    J --> K{Cell Signal?}
-    K -- Yes --> L[Cloud Function webhook\ncreates Firestore incident]
-    K -- No --> M[Manual relay shown\nClipboard copy]
-    L --> N[Normal FCM + dispatch flow]
-
-    B -- Reconnects --> O[OfflineSosStatus detects\nreconnection]
-    O --> P{SMS already created\nincident?}
-    P -- Yes --> Q[Merge local cache\nwith existing incident]
-    P -- No --> R[Create now\nbackfilled timestamp]
-
-    subgraph Fallbacks["Fallback Stack"]
-        F1["LiveKit WebRTC Voice"]
-        F2["Firebase PTT Text Relay"]
-        F3["GeoSMS Gateway"]
-        F4["Local Cache + Manual"]
-        F1 --> F2 --> F3 --> F4
-    end
-```
-
-| Scenario | Behavior |
-|----------|----------|
-| Full connectivity | All features active — AI, voice, live tracking, push |
-| Slow / intermittent | Firestore offline persistence; syncs on reconnect |
-| No data, cell signal present | GeoSMS creates incident via webhook automatically |
-| No data, no signal | Local cache; PTT manual relay shown; syncs on reconnect |
-| LiveKit unavailable | Instant fallback to Firebase PTT |
-| AI timeout or overload | Switches Gemini → Gemma 4 via integration routing flag |
-| Tab closed mid-SOS | `OfflineSosStatusService` persists SOS ID; resumes on reopen |
-| Duplicate from SMS + app | Cloud Function deduplicates by coordinates + timestamp window |
-
----
-
-<br/>
-
-## 🛡️ Security
-
-- **Firebase App Check** — all Cloud Functions and Firestore writes are protected from unauthorized API access
-- **Server-side AI keys** — Gemini and LiveKit secrets stored in Firebase Secret Manager; never sent to client
-- **Role-based Firestore rules** — two console roles (master, medical); granular `diff().affectedKeys()` validation
-- **Rate limiting** — AI chat, SOS creation, and dispatch calls are rate-limited server-side
-- **LiveKit token gating** — room tokens issued only to verified incident participants
-- **Audit trail** — all incident status changes and dispatch events are appended to `audit_log` subcollections
-
----
-
-<br/>
-
-## 🧰 Tech Stack
+## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| **Frontend** | Flutter 3.x (Web + iOS + Android) |
-| **State Management** | Flutter Riverpod |
-| **Navigation** | GoRouter |
-| **Backend** | Firebase Cloud Functions (Node.js) |
-| **Database** | Cloud Firestore (real-time + offline persistence) |
-| **Authentication** | Firebase Auth (Email, Google, Phone OTP, Anonymous) |
-| **AI — Triage & Chat** | Google Gemini 2.0 Flash (via Cloud Functions) |
-| **AI — Local Fallback** | Gemma 4 (switchable via ops integration routing) |
-| **Maps & Routing** | Google Maps SDK + OSRM driving routes |
-| **Voice Bridge** | LiveKit WebRTC |
-| **Voice Fallback** | Firebase PTT (Firestore relay) |
-| **Offline SOS** | GeoSMS Gateway (Open GeoSMS protocol) |
-| **Push Notifications** | Firebase Cloud Messaging |
-| **Observability** | Firebase Crashlytics + Performance |
-| **Security** | Firebase App Check + Firestore Security Rules |
-| **Storage** | Firebase Storage (cert uploads, scene photos) |
+| **Mobile / Web App** | Flutter 3.x (Dart), go_router v17, Riverpod 3 |
+| **UI** | Material 3, flutter_animate, Lottie, shimmer, fl_chart |
+| **Maps** | google_maps_flutter, flutter_map, geolocator, geocoding, flutter_polyline_points |
+| **AI** | Gemini 2.5 Flash (triage vision, LIFELINE chat, scene brief, ops analytics) |
+| **Voice AI** | LiveKit Agents (TypeScript), OpenAI Realtime API, @livekit/noise-cancellation-node |
+| **WebRTC** | livekit_client (Flutter), livekit-server-sdk (Node.js) |
+| **Backend** | Firebase Cloud Functions v2 (Node.js 18), 3,358 lines of production logic |
+| **Database** | Cloud Firestore (real-time, offline persistence, 50 MB cache) |
+| **Auth** | Firebase Auth (Google Sign-In, Email/Password, Anonymous, reCAPTCHA v3) |
+| **Push** | Firebase Cloud Messaging (3-layer geo + topic + all-user dispatch) |
+| **Storage** | Firebase Storage (scene photos, triage images, incident video) |
+| **SMS** | Twilio (inbound GeoSMS webhook, outbound ETA & contact alerts) |
+| **State Management** | flutter_riverpod, riverpod_annotation |
+| **Localization** | flutter_localizations, intl (12 Indian languages) |
+| **Security** | Firebase App Check (Play Integrity + DeviceCheck + reCAPTCHA v3) |
+| **Monitoring** | Firebase Crashlytics, Firebase Performance |
+| **Platforms** | Android, iOS, Web (3 hosted targets), Linux, Windows, macOS |
 
 ---
 
-<br/>
+## Cloud Functions Reference
 
-## 🗂️ Project Structure
+| Function | Trigger | Purpose |
+|----------|---------|---------|
+| `dispatchSOS` | Firestore onCreate `sos_incidents/{id}` | 3-layer FCM dispatch + hospital hex routing |
+| `dispatchHospitalInHex` | Called by dispatchSOS | Score & order hospitals by hex ring + specialty |
+| `hospitalDispatchEscalation` | Scheduled every 1 min | Auto-escalate if hospital doesn't accept in 2 min |
+| `acceptHospitalDispatch` | Callable | Hospital accepts — triggers ambulance fleet notify |
+| `declineHospitalDispatch` | Callable | Hospital declines — escalates to next hospital |
+| `onHospitalAssignmentAcceptedDispatchAmbulance` | Firestore onUpdate | Notify nearest fleet units when hospital accepts |
+| `acceptAmbulanceDispatch` | Callable | Operator accepts — sets EMS en-route, updates victim |
+| `ambulanceDispatchEscalation` | Scheduled every 1 min | No operator? Escalate to next fleet unit / hospital |
+| `expireStaleFleetPendingAssignments` | Scheduled every 1 min | Mark 3-min expired fleet assignments |
+| `lifelineChat` | Callable | Gemini 2.5 Flash LIFELINE AI (chat/analytics/training modes) |
+| `analyzeTriageImage` | Callable | Gemini vision triage from camera photo |
+| `analyzeIncidentVideo` | Callable | Gemini video scene analysis (accepted volunteers only) |
+| `generateSituationBriefForIncident` | Callable | Gemini scene brief from volunteer report + video + photos |
+| `refreshSituationBriefsScheduled` | Scheduled every 5 min | Keep active incident briefs fresh |
+| `getLivekitToken` | Callable | Mint WebRTC join token for emergency bridge (5 roles) |
+| `getCopilotLivekitToken` | Callable | Mint copilot room token (per-user) |
+| `ensureEmergencyBridge` | Callable | Dispatch Lifeline voice agent into incident room |
+| `ensureCopilotAgent` | Callable | Dispatch Copilot voice agent (rate-limited, 2-min) |
+| `dispatchLifelineComms` | Callable | Speak important comms text in emergency room |
+| `ensureCommsBridgeRooms` | Callable | Create operation + emergency LiveKit rooms per incident |
+| `getCommsBridgeLivekitToken` | Callable | Token for hospital/EMS comms bridge (3 channels) |
+| `parseSmsGateway` | HTTP (Twilio webhook) | Parse GeoSMS → create/merge incident |
+| `onIncidentUpdate` | Firestore onUpdate | SMS ETA updates back to victim phone |
+| `notifyEmergencyContactOnUpdate` | Firestore onUpdate | SMS updates to emergency contact (rate-limited 2 min) |
+| `updateLeaderboardOnIncidentChange` | Firestore onCreate `sos_incidents_archive/{id}` | Server-side leaderboard aggregation |
+| `expireStaleSosIncidents` | Scheduled every 5 min | Hard 1h TTL → archive + delete active incidents |
+| `expireStaleHospitalConsignments` | Scheduled every 5 min | Close hospital assignments after 1h |
+| `enforceSosCreateLimits` | Firestore onCreate | Rate-limit flag (fail-open — never blocks real emergencies) |
+| `onExternalIncidentTrigger` | HTTP (partner webhook) | Third-party incident/AED/readiness event ingestion |
+| `refreshHospitalDispatchOnDispatchHints` | Firestore onUpdate | Re-dispatch if AI updates `dispatchHints` |
+| `redispatchOnRequiredServicesChange` | Firestore onUpdate | Re-dispatch when required services change |
+| `getOpsSystemHealth` | Callable | Integration health check (Firestore, LiveKit, SMS) |
+| `opsSupportUserDigest` | Callable | Masked user lookup for ops support |
+| `opsSupportForceSignOut` | Callable | Force sign-out a user (security) |
+
+---
+
+## Firestore Collections
 
 ```
-lib/
-├── core/
-│   ├── constants/          # App constants, India ops zones, unit roles
-│   ├── l10n/               # Localization
-│   ├── maps/               # Hybrid map controller, ops map helpers
-│   ├── providers/          # Global Riverpod providers + drill session state
-│   ├── theme/              # Colors, typography
-│   └── widgets/            # Shared UI components
-├── features/
-│   ├── ai_assist/          # Lifeline AI chat + triage image analysis
-│   ├── auth/               # Login, OTP, Google Sign-In flows
-│   ├── dashboard/          # Home dashboard + status cards
-│   ├── family/             # Emergency contact management
-│   ├── hazards/            # Community hazard reporting
-│   ├── home/               # SOS button + countdown overlay
-│   ├── hospital_bridge/    # Hospital comms channel (Firestore-backed)
-│   ├── incidents/          # Incident history + archive viewer
-│   ├── map/                # Emergency zone map viewers
-│   ├── onboarding/         # First-run setup + permission prompts
-│   ├── operations/         # Gemini-powered ops insights screen
-│   ├── profile/            # User profile, XP, certifications
-│   ├── ptt/                # Push-to-talk voice fallback
-│   ├── sos/                # SOS intake, active screen, GeoSMS screen
-│   ├── staff/              # Admin consoles (master + medical/hospital)
-│   └── volunteers/         # Volunteer registration, readiness, dispatch
-└── services/
-    ├── fleet_assignment_service.dart   # Dispatch → driver notification flow
-    ├── fleet_unit_service.dart         # Ambulance GPS sync
-    ├── incident_service.dart           # Full SOS incident lifecycle
-    ├── lifeline_ai_router.dart         # Gemini/Gemma routing + fallback
-    ├── offline_cache_service.dart      # Local SOS persistence
-    ├── offline_sos_status_service.dart # Reconnect sync logic
-    ├── ops_hospital_service.dart       # Hospital data + assignment
-    ├── sms_gateway_service.dart        # GeoSMS construction + dispatch
-    ├── volunteer_readiness_service.dart # Readiness score computation
-    ├── voice_comms_service.dart        # LiveKit + PTT orchestration
-    └── ...
-functions/
-├── index.js                # All Cloud Functions
-firestore.rules             # Security rules for all collections
+sos_incidents/             Active emergencies (1h TTL then archived)
+sos_incidents_archive/     Closed incidents (leaderboard trigger source)
+ops_hospitals/             Hospital registry (lat, lng, beds, services, hex)
+ops_incident_hospital_assignments/  Dispatch chain state per incident
+ops_fleet_units/           Ambulance units (availability heartbeat 90s TTL)
+ops_fleet_assignments/{callSign}/pending/  Per-operator dispatch queue
+users/                     User profiles, medical history, FCM tokens
+volunteers/                Volunteer presence with lat/lng for geo-query
+leaderboard/               Pre-computed volunteer rankings
+ptt_channels/{id}/messages/  Push-to-talk voice transcripts
+livekit_bridges/           Emergency bridge dispatch records
+livekit_copilot_dispatches/ Copilot agent rate-limit records
+ops_dashboard_alerts/      Real-time ops feed (hospital dispatch events)
+ops_health_metrics/        System counters (dispatch success/error rates)
+sos_dispatch_limits/       Per-user geo-dispatch rate-limit state
+sos_create_limits/         Per-user SOS creation rate-limit state
+aeds/                      AED defibrillator locations (webhook-upsertable)
+preparedness_events/       Community readiness event log
+webhook_events/            Third-party trigger audit log
 ```
 
 ---
 
-<br/>
+## App Variants (Three Hosted Targets)
 
-## 🚀 Getting Started
+| Variant | Entry Point | Hosted At | Primary Users |
+|---------|-------------|-----------|---------------|
+| **Main** | `main.dart` → `AppVariant.main` | `build/web-main` | Citizens, volunteers, patients |
+| **Admin** | `main_admin.dart` → `AppVariant.admin` | `build/web-admin` | Operations command staff |
+| **Fleet** | `main_fleet.dart` → `AppVariant.fleet` | `build/web-fleet` | Ambulance operators |
+
+Each variant boots the same Flutter app with `buildRouter(variant)` applying role-specific routing guards, entry screens, and navigation shells.
+
+---
+
+## LiveKit Voice Rooms
+
+| Room Name | Purpose | Participants |
+|-----------|---------|-------------|
+| `emergency_bridge_{incidentId}` | Victim ↔ Lifeline AI ↔ Volunteers ↔ EMS | victim, accepted_volunteer, volunteer_elite, ems_fleet, emergency_desk, emergency_contact |
+| `copilot_{uid}` | Per-user persistent voice assistant | copilot_user_{uid}, Copilot AI agent |
+| `commsop_{incidentId}` | Operation coordination voice | Hospital staff, EMS operator |
+| `commsem_{incidentId}` | Emergency voice channel | Hospital emergency desk, EMS |
+| `comms_command_net` | Master command voice net | Admin master console only |
+
+Token TTL: 6 hours for emergency bridge, 12 hours for comms bridge.
+
+---
+
+## Local Setup
 
 ### Prerequisites
+- Flutter SDK `^3.11.3`
+- Node.js 18+
+- Firebase CLI
+- A Firebase project with Firestore, Auth, FCM, Storage, App Check enabled
 
-- Flutter SDK 3.x
-- Firebase CLI (`npm install -g firebase-tools`)
-- Firebase project with: Firestore, Auth, Functions, FCM, App Check, Storage, Crashlytics enabled
-- Google Maps API Key with Maps SDK (Android + iOS + Web)
-- LiveKit Cloud or self-hosted LiveKit server
-- Gemini API Key (Google AI Studio or Vertex AI)
-
-### Environment Setup
+### 1. Clone & Install
 
 ```bash
-flutter run --dart-define=MAPS_API_KEY=your_key \
-            --dart-define=RECAPTCHA_SITE_KEY=your_key \
-            --dart-define=LIVEKIT_URL=wss://your-livekit-server
+git clone https://github.com/shikhar1809/EmergencyOS_Google_Solution_Challenge.git
+cd EmergencyOS_Google_Solution_Challenge
+flutter pub get
 ```
 
-Gemini and LiveKit API keys are stored in **Firebase Secret Manager** and accessed only via Cloud Functions.
-
-### Deploy
+### 2. Firebase Configuration
 
 ```bash
-# Full deploy
-firebase deploy
+# Install FlutterFire CLI
+dart pub global activate flutterfire_cli
 
-# Functions only
+# Configure your Firebase project
+flutterfire configure
+```
+
+### 3. Cloud Functions Setup
+
+```bash
+cd functions
+npm install
+
+# Copy environment template
+cp .env.example .env
+# Edit .env with your keys:
+# GEMINI_API_KEY=...
+# LIVEKIT_URL=wss://your-project.livekit.cloud
+# LIVEKIT_API_KEY=...
+# TWILIO_ACCOUNT_SID=...  (optional)
+# TWILIO_AUTH_TOKEN=...   (optional)
+# TWILIO_PHONE_NUMBER=... (optional)
+
+# Set LiveKit secret in Firebase Secret Manager
+firebase functions:secrets:set LIVEKIT_API_SECRET
+
+# Deploy functions
 firebase deploy --only functions
+```
 
-# Web hosting
-flutter build web --release && firebase deploy --only hosting
+### 4. LiveKit Agents Setup
+
+**Lifeline voice agent** (reads important comms):
+```bash
+cd livekit-agent/lifeline-agent
+npm install
+cp .env.example .env.local
+# Edit with LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, OPENAI_API_KEY
+npm run dev
+```
+
+**Copilot voice agent** (persistent AI assistant):
+```bash
+cd livekit-agent/copilot-agent
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+### 5. Run the App
+
+```bash
+# Main app (citizens/volunteers)
+flutter run -t lib/main.dart
+
+# Admin console
+flutter run -t lib/main_admin.dart
+
+# Fleet operator panel
+flutter run -t lib/main_fleet.dart
+```
+
+### 6. Firebase Hosting Deploy
+
+```bash
+# Build all three targets
+flutter build web --release --dart-define RECAPTCHA_SITE_KEY=your_key
+# (repeat with --target lib/main_admin.dart --output build/web-admin etc.)
+
+firebase deploy --only hosting
 ```
 
 ---
 
-<br/>
+## Environment Variables Reference
 
-## 🎓 Drill Mode
+### Cloud Functions (`functions/.env`)
 
-EmergencyOS includes a built-in **Drill Mode** for training and live demos without triggering real emergency alerts.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GEMINI_API_KEY` | Yes | Google Generative AI key for LIFELINE + triage |
+| `LIVEKIT_URL` | Yes* | `wss://your-project.livekit.cloud` |
+| `LIVEKIT_HTTP_URL` | Yes* | `https://your-project.livekit.cloud` (use if no wss URL) |
+| `LIVEKIT_API_KEY` | Yes | LiveKit API key (Firebase parameter or env) |
+| `LIVEKIT_API_SECRET` | Yes | LiveKit API secret (Firebase Secret Manager) |
+| `LIFELINE_LIVEKIT_AGENT_NAME` | No | Default: `lifeline` |
+| `COPILOT_LIVEKIT_AGENT_NAME` | No | Default: `copilot` |
+| `TWILIO_ACCOUNT_SID` | Optional | SMS gateway (offline SOS relay) |
+| `TWILIO_AUTH_TOKEN` | Optional | Twilio auth |
+| `TWILIO_PHONE_NUMBER` | Optional | Sender number for outbound SMS |
+| `WEBHOOK_SHARED_SECRET` | Optional | Shared secret for third-party incident webhook |
 
-- Simulates a complete lifecycle: SOS → Dispatch → Volunteer → Hospital Assignment → Resolution
-- Demo incidents, ambulance positions, and volunteer presence are auto-seeded on admin console load
-- SOS intake is fully interactive; submit is clearly disabled with a training banner
-- Safe to run in front of judges, stakeholders, or during operational training
+### LiveKit Agents (`.env.local`)
 
----
-
-<br/>
-
-## 📊 Impact Targets
-
-| Metric | Target |
-|--------|--------|
-| SOS to first volunteer notification | **< 30 seconds** |
-| Hospital preparation lead time added | **3–8 minutes** via pre-arrival data |
-| First-response coverage increase | **2–4x** by activating certified bystanders |
-| Offline SOS delivery (cell signal present) | **> 95%** via GeoSMS |
-
----
-
-<br/>
-
-## 🗺️ Roadmap
-
-- [ ] **PSAP Integration** — direct API bridge to 112/108 national dispatch centers
-- [ ] **Multilingual Lifeline** — AI guidance in Hindi, Tamil, Bengali, Telugu
-- [ ] **Predictive Dispatch** — ML model for proactive unit pre-positioning based on incident heatmaps
-- [ ] **Offline-First AI** — on-device Gemma inference with zero network dependency
-- [ ] **Paramedic App** — dedicated EMS crew interface with vitals input and handoff protocol
+| Variable | Description |
+|----------|-------------|
+| `LIVEKIT_URL` | WebSocket URL |
+| `LIVEKIT_API_KEY` | API key |
+| `LIVEKIT_API_SECRET` | API secret |
+| `OPENAI_API_KEY` | For Realtime voice model |
 
 ---
 
-<br/>
+## Key Design Decisions
 
-## 🤝 Contributing
+### Why hex-grid dispatch (not simple radius)?
+Hex grids provide **uniform neighbor distance** in all 6 directions — no nearest-corner bias. The flat-top axial coordinate system allows precise `ring-0` (same cell) → `ring-5` (5 steps out) escalation with consistent km spacing, matching how real cities are zoned.
 
-```
-1. Fork the repository
-2. git checkout -b feature/your-feature
-3. Follow Riverpod provider architecture for all new state
-4. Test offline flows before submitting
-5. Open a pull request describing the real-world scenario it addresses
-```
+### Why 3-layer FCM instead of 1?
+Layer 1 (geo-multicast) may fail if volunteers aren't subscribed to the topic or their token is stale. Layer 2 (topic) guarantees all subscribers get it. Layer 3 (all-users) is the safety net for unsubscribed devices. Each layer runs **independently** — one failure never silences another. This is the core reliability guarantee.
 
----
+### Why fail-open on SOS rate limiting?
+Real emergencies cannot be missed for the sake of preventing spam. Rate-limit violations are flagged (`rateLimitFlagged: true`) but **never block the incident**. Dispatch still fires. Ops can review flagged incidents.
 
-<br/>
+### Why three separate web hosting targets?
+Admin and fleet panels have different root routes, auth guards, navigation logic, and even Firebase project options. Separate compilations allow independent deployments, isolated cache headers, and role-based access at the CDN level.
 
-## 📄 License
-
-MIT License — see [LICENSE](LICENSE) for details.
+### Why LiveKit over proprietary WebRTC?
+LiveKit provides an open, self-hostable WebRTC SFU with agent dispatch APIs — critical for an emergency platform that must not depend on a single commercial provider's availability during disasters. The `AgentDispatchClient` allows us to push AI voice agents into rooms programmatically from Cloud Functions.
 
 ---
 
-<br/>
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. All contributions welcome — especially:
+- Additional language translations (`lib/core/l10n/`)
+- New LIFELINE training levels (`lib/features/ai_assist/domain/lifeline_training_levels.dart`)
+- Hospital and AED database integrations
+- OSRM / offline routing improvements
+
+---
+
+## License
+
+MIT — See [LICENSE](LICENSE)
+
+---
+
+## Acknowledgements
+
+Built with ❤️ for the **Google Solution Challenge 2026** under the **Rapid Emergency Response** theme (Open Track).
+
+Powered by Google Cloud, Firebase, Gemini AI, Google Maps Platform, LiveKit, and OpenAI.
+
+---
 
 <div align="center">
 
-**EmergencyOS**
+**Built by Shikhar Shahi**
 
-*Built in the memory of every minute that mattered.*
-*Designed so no family has to stand in the dark, not knowing.*
-
-<br/>
-
-**Designed to Save Lives.**
-
-<br/>
-
-*By **Shikhar Shahi** (Afterburners)*
-*For the **Google Solution Challenge 2026***
-
-<br/>
-
----
-
-*If this project has touched you, or if you've lived a night like mine — star it. Not for metrics. As a reminder that someone is working on this.*
-
-⭐
+*For every family that deserves a faster, smarter emergency response.*
 
 </div>
