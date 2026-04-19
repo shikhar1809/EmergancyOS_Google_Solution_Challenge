@@ -1,15 +1,20 @@
 const { onCall } = require("firebase-functions/v2/https");
 const { HttpsError } = require("firebase-functions/v2/https");
 const { GoogleGenAI } = require("@google/genai");
+const { AI_SAFETY_PREAMBLE, withSafetyForRole } = require("./ai_safety");
 
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = new GoogleGenAI({ apiKey });
 
 function lifelineSystemPrompt(scenario) {
   const s = scenario || "General Emergency";
-  return `You are LIFELINE, a medical first-aid co-pilot for emergencies.
-Scenario: ${s}
-Rules: output exactly 3-5 numbered steps in plain text. Be safe and concrete. If life-threatening, include "Call 112 now" as a step.`;
+  return (
+    AI_SAFETY_PREAMBLE +
+    "\n\n" +
+    `## ROLE: LIFELINE FIRST-AID COPILOT\n` +
+    `Scenario: ${s}\n` +
+    `Rules: output exactly 3-5 numbered steps in plain text. Be safe and concrete. If life-threatening, include "Call 112 now" as a step.`
+  );
 }
 
 exports.analyzeTriageImage = onCall(async (request) => {
@@ -17,9 +22,10 @@ exports.analyzeTriageImage = onCall(async (request) => {
   const { base64str, mimeType, prompt } = request.data;
   if (!base64str || !prompt) throw new HttpsError("invalid-argument", "Missing image or prompt");
   try {
+    const safePrompt = withSafetyForRole("triage", prompt);
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: [prompt, { inlineData: { data: base64str, mimeType: mimeType || "image/jpeg" } }]
+      contents: [safePrompt, { inlineData: { data: base64str, mimeType: mimeType || "image/jpeg" } }]
     });
     return { result: response.text() };
   } catch (e) {
@@ -57,7 +63,10 @@ exports.analyzeIncidentVideo = onCall(async (request) => {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: [
-        `Analyze this emergency scene image for incident ${incidentId}. Describe hazards, victim count, and recommended response. Be concise.`,
+        withSafetyForRole(
+          "vision",
+          `Analyze this emergency scene image for incident ${incidentId}. Describe hazards, victim count, and recommended response. Be concise.`,
+        ),
         { inlineData: { data: base64str, mimeType: mimeType || "image/jpeg" } }
       ]
     });
@@ -76,7 +85,10 @@ exports.analyzeIncidentVoiceNote = onCall(async (request) => {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: [
-        `Transcribe and analyze this emergency voice note for incident ${incidentId}. Extract key medical details.`,
+        withSafetyForRole(
+          "vision",
+          `Transcribe and analyze this emergency voice note for incident ${incidentId}. Extract key medical details.`,
+        ),
         { inlineData: { data: audioBase64, mimeType: "audio/webm" } }
       ]
     });
@@ -88,13 +100,14 @@ exports.analyzeIncidentVoiceNote = onCall(async (request) => {
 });
 
 function buildSituationBriefPrompt(incident, activity, hospital, volunteers) {
-  return `Generate a concise situation brief for emergency responders.
+  const task = `Generate a concise situation brief for emergency responders.
 Incident: ${incident.type || "Unknown"} at ${incident.lat}, ${incident.lng}
 Status: ${incident.status || "active"}
 Hospital: ${hospital || "pending"}
 Volunteers: ${(volunteers || []).length} assigned
 Recent activity: ${(activity || []).slice(0, 10).map(a => a.text || "").join("; ")}
 Output: 3-5 bullet points max. Focus on actionable intelligence.`;
+  return withSafetyForRole("brief", task);
 }
 
 exports.generateSituationBriefForIncident = onCall(async (request) => {

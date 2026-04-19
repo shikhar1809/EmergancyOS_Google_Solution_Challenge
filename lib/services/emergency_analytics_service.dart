@@ -1,8 +1,9 @@
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter/foundation.dart';
+
 /// EmergencyOS: AnalyticsInsight in lib/services/emergency_analytics_service.dart.
 class AnalyticsInsight {
   final String explanation;
@@ -20,20 +21,17 @@ class InsightMarker {
 }
 
 /// EmergencyOS: EmergencyAnalyticsService in lib/services/emergency_analytics_service.dart.
+///
+/// Admin analytics insights powered by Gemini, routed through the server-side
+/// `lifelineChat` Cloud Function (analyticsMode). No client-side API key is
+/// required — the Gemini secret lives on Cloud Functions.
 class EmergencyAnalyticsService {
-  // Replace with the actual API Key or utilize firebase extensions logic if preferred.
-  // For the solution challenge demo, injecting via dart-define or env is standard.
-  static const String _geminiApiKey = String.fromEnvironment('GEMINI_API_KEY', defaultValue: '');
-  
-  static Future<AnalyticsInsight> getAdminInsights(String userPrompt) async {
-    if (_geminiApiKey.isEmpty) {
-      throw Exception('Gemini API Key is missing. Add --dart-define=GEMINI_API_KEY=your_key to your build command.');
-    }
+  static const _scenario = 'Admin analytics insights (map markers + explanation)';
 
+  static Future<AnalyticsInsight> getAdminInsights(String userPrompt) async {
     try {
-      // 1. Fetch raw data
       final db = FirebaseFirestore.instance;
-      // Fetch up to 100 recent archived incidents (for historical hotspotting)
+
       final archivedSnap = await db
           .collection('sos_incidents')
           .where('isArchived', isEqualTo: true)
@@ -41,7 +39,6 @@ class EmergencyAnalyticsService {
           .limit(100)
           .get();
 
-      // Fetch active
       final activeSnap = await db
           .collection('sos_incidents')
           .where('isArchived', isEqualTo: false)
@@ -60,53 +57,73 @@ class EmergencyAnalyticsService {
         };
       }).toList();
 
-      final dataDump = jsonEncode(allIncidents);
+      final digest =
+          'Incident snapshot (count=${allIncidents.length}):\n${jsonEncode(allIncidents)}';
 
-      // 2. Initialize Gemini
-      final model = GenerativeModel(
-        model: 'gemini-2.5-flash', 
-        apiKey: _geminiApiKey,
-        systemInstruction: Content.system('''
-You are an expert emergency response data analyst. You will be provided with a JSON dump of historic and active SOS incidents.
-The user is an Emergency System Admin.
-When responding to the user's query, you MUST return a strict JSON object with EXACTLY two keys:
-1. "explanation": A detailed, conversational text string explaining your analytical findings and rationale. Format with line breaks if necessary.
-2. "markers": A JSON array of objects, containing { "lat": double, "lng": double, "label": "Short String Label" }. Limit to maximum 5 markers.
+      final message = '''
+User Query: $userPrompt
 
-DO NOT return any markdown formatting outside of the JSON block. Return ONLY the raw JSON object.
-'''),
-      );
+You MUST return ONLY a raw JSON object with EXACTLY two keys:
+1. "explanation": conversational analytical findings (line breaks allowed).
+2. "markers": array of at most 5 objects: { "lat": number, "lng": number, "label": string }.
 
-      final prompt = 'User Query: $userPrompt\n\nIncident Data: $dataDump';
-      
-      final response = await model.generateContent([Content.text(prompt)]);
-      final text = response.text?.trim() ?? '';
-      
-      // Clean up markdown json blocks if gemini included them despite instructions
-      String jsonText = text;
-      if (jsonText.startsWith('```json')) {
-        jsonText = jsonText.substring(7);
-        if (jsonText.endsWith('```')) {
-          jsonText = jsonText.substring(0, jsonText.length - 3);
-        }
-      } else if (jsonText.startsWith('```')) {
-         jsonText = jsonText.substring(3);
-         if (jsonText.endsWith('```')) {
-          jsonText = jsonText.substring(0, jsonText.length - 3);
-        }
+No markdown fences, no prose outside the JSON.
+''';
+
+      final callable = FirebaseFunctions.instance.httpsCallable('lifelineChat');
+      final res = await callable
+          .call(<String, dynamic>{
+            'message': message,
+            'scenario': _scenario,
+            'contextDigest': digest,
+            'history': const <Map<String, String>>[],
+            'analyticsMode': true,
+          })
+          .timeout(const Duration(seconds: 30));
+
+      final data = (res.data as Map?) ?? const {};
+      final status = (data['status'] as String?)?.trim() ?? 'ok';
+      final text = (data['text'] as String?)?.trim() ?? '';
+
+      if (status == 'offline') {
+        throw Exception(
+          'Analytics AI is offline on this project. Ask an admin to set GEMINI_API_KEY in Cloud Functions secrets.',
+        );
+      }
+      if (text.isEmpty) {
+        throw Exception('Empty response from analytics AI.');
       }
 
-      final decoded = jsonDecode(jsonText.trim());
-      
-      final explanation = decoded['explanation'] ?? 'No explanation provided.';
-      final List<dynamic> markersRaw = decoded['markers'] ?? [];
-      
-      final markers = markersRaw.map((m) {
-        return InsightMarker(
-          position: LatLng(m['lat'] as double, m['lng'] as double),
-          label: (m['label'] ?? 'Marker').toString(),
+      var jsonText = text;
+      if (jsonText.startsWith('```json')) {
+        jsonText = jsonText.substring(7);
+      } else if (jsonText.startsWith('```')) {
+        jsonText = jsonText.substring(3);
+      }
+      if (jsonText.endsWith('```')) {
+        jsonText = jsonText.substring(0, jsonText.length - 3);
+      }
+
+      final match = RegExp(r'\{[\s\S]*\}').firstMatch(jsonText.trim());
+      final decoded = jsonDecode(match?.group(0) ?? jsonText.trim());
+
+      final explanation =
+          (decoded['explanation'] as String?)?.trim() ?? 'No explanation provided.';
+      final List<dynamic> markersRaw = (decoded['markers'] as List?) ?? const [];
+
+      final markers = <InsightMarker>[];
+      for (final m in markersRaw) {
+        if (m is! Map) continue;
+        final lat = (m['lat'] as num?)?.toDouble();
+        final lng = (m['lng'] as num?)?.toDouble();
+        if (lat == null || lng == null) continue;
+        markers.add(
+          InsightMarker(
+            position: LatLng(lat, lng),
+            label: (m['label'] ?? 'Marker').toString(),
+          ),
         );
-      }).toList();
+      }
 
       return AnalyticsInsight(explanation: explanation, markers: markers);
     } catch (e, st) {

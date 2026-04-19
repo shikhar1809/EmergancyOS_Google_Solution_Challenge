@@ -122,6 +122,25 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ── Hospital inbox: per-hospital persistent queue written by the v2
+    //    dispatch engine. Each hospital's staff can only read their own inbox;
+    //    master console reads any. Writes are Cloud Functions only.
+    match /hospital_inbox/{hospitalId}/incidents/{incidentId} {
+      allow read:  if request.auth != null && (
+                     isMasterOpsConsoleEmail()
+                     || userHospitalBindingMatches(hospitalId)
+                   );
+      allow write: if false;
+    }
+
+    // ── Rolling reliability stats (accept/decline/timeout counts) that the
+    //    v2 dispatch engine reads when scoring candidates. Authenticated read
+    //    for the ops console; writes by Cloud Functions only.
+    match /hospital_reliability/{hospitalId} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+
     // ── Fleet units: read for authenticated; operators update heartbeat ───────
     match /ops_fleet_units/{id} {
       allow read:  if request.auth != null;
