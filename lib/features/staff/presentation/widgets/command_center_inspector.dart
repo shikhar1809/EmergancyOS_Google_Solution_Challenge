@@ -182,6 +182,108 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
     );
   }
 
+  /// Surfaces the Gemini vision triage (written by `applyAiTriageToIncident`)
+  /// as a visible dispatch decision in the command center. If no AI triage is
+  /// present, the widget collapses to nothing.
+  Widget _aiTriageCard(SosIncident inc) {
+    final triage = inc.triage;
+    if (triage == null) return const SizedBox.shrink();
+    final aiVision = triage['aiVision'];
+    if (aiVision is! Map) return const SizedBox.shrink();
+    final severity = (aiVision['severity'] ?? '').toString().toLowerCase();
+    final category = (aiVision['category'] ?? '').toString();
+    final specialty = (aiVision['aiRecommendedSpecialty'] ?? '').toString();
+    final confidence = (aiVision['confidence'] ?? 'medium').toString();
+    final analysis = (aiVision['analysis'] ?? '').toString();
+    final steps = (aiVision['steps'] is List)
+        ? (aiVision['steps'] as List).map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).toList()
+        : const <String>[];
+
+    final severityColor = switch (severity) {
+      'red' => Colors.redAccent,
+      'yellow' => Colors.amberAccent,
+      'black' => Colors.white70,
+      _ => Colors.greenAccent,
+    };
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.cyanAccent.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.auto_awesome_rounded, color: Colors.cyanAccent, size: 16),
+              const SizedBox(width: 6),
+              const Text('GEMINI TRIAGE VISION',
+                  style: TextStyle(color: Colors.cyanAccent, fontSize: 11, letterSpacing: 1.4, fontWeight: FontWeight.w900)),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: severityColor.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: severityColor.withValues(alpha: 0.6)),
+                ),
+                child: Text(severity.toUpperCase(),
+                    style: TextStyle(color: severityColor, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.2)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              if (category.isNotEmpty)
+                _chip(label: 'category: $category', color: Colors.white70),
+              if (specialty.isNotEmpty)
+                _chip(label: 'AI routed → $specialty', color: Colors.cyanAccent),
+              _chip(label: 'confidence: $confidence', color: Colors.white54),
+            ],
+          ),
+          if (analysis.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(analysis, style: const TextStyle(color: Colors.white, fontSize: 12, height: 1.4)),
+          ],
+          if (steps.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            ...steps.take(5).map((s) => Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('• ', style: TextStyle(color: Colors.cyanAccent, fontSize: 12)),
+                    Expanded(child: Text(s, style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.35))),
+                  ]),
+                )),
+          ],
+          const SizedBox(height: 6),
+          const Text(
+            'Hospital dispatch chain has been re-ranked using this specialty recommendation.',
+            style: TextStyle(color: Colors.white38, fontSize: 10, fontStyle: FontStyle.italic),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _chip({required String label, required Color color}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700)),
+    );
+  }
+
   Widget _dispatchPriorityBanner(SosIncident inc) {
     final pri = DispatchIncidentPriority.forIncident(inc, widget.sceneIncidentTier);
     final c = switch (pri.label) {
@@ -600,6 +702,7 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _dispatchPriorityBanner(inc),
+          _aiTriageCard(inc),
           SharedSituationBriefCard(
             incidentId: inc.id,
             accentColor: const Color(0xFF7C4DFF),

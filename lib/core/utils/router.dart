@@ -183,7 +183,13 @@ GoRouter buildRouter(AppVariant variant) {
           );
         },
       ),
-      GoRoute(path: '/triage', builder: (context, state) => const TriageCameraScreen()),
+      GoRoute(
+        path: '/triage',
+        builder: (context, state) {
+          final incidentId = state.uri.queryParameters['incidentId'];
+          return TriageCameraScreen(incidentId: (incidentId != null && incidentId.isNotEmpty) ? incidentId : null);
+        },
+      ),
       GoRoute(
         path: '/ptt-channel/:incidentId',
         builder: (context, state) {

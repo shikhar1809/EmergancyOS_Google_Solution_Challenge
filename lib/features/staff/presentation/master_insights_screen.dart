@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/india_ops_zones.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/ai_advisory_banner.dart';
 import '../../../core/utils/fleet_unit_availability.dart';
 import '../../../services/fleet_unit_service.dart';
 import '../../../services/incident_service.dart';
@@ -273,6 +274,10 @@ class _MasterInsightsScreenState extends State<MasterInsightsScreen> {
                 ),
               ],
             ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: AiAdvisoryBanner.analytics(dense: true),
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),

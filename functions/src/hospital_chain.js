@@ -12,23 +12,31 @@ const EARTH_RADIUS_KM = 6371;
 const ALERT_RADIUS_KM = 20;
 function degreesToRadians(deg) { return deg * (Math.PI / 180); }
 
-function hospitalDispatchScore(c, requiredServices, emergencyType, relaxedServices) {
+function hospitalDispatchScore(c, requiredServices, emergencyType, relaxedServices, aiSpecialty) {
   let score = c.ring * 100 + c.distKm * 2;
   if (c.bedsAvail <= 0) score += 500;
   else if (c.bedsAvail <= 2) score += 50;
   else if (c.bedsAvail <= 5) score += 20;
   if (!relaxedServices && requiredServices.length > 0 && !c.servicesOk) score += 1000;
-  score -= specialtyBonus(c.offered, emergencyType);
+  score -= specialtyBonus(c.offered, emergencyType, aiSpecialty);
   return score;
 }
 
-function specialtyBonus(offered, emergencyType) {
+function specialtyBonus(offered, emergencyType, aiSpecialty) {
   const t = (emergencyType || "").toLowerCase();
   const off = (offered || []).map((s) => String(s).toLowerCase());
   let bonus = 0;
   if (/(accident|crash|rta|collision|road|vehicle)/.test(t) && off.some((s) => s.includes("trauma"))) bonus += 42;
   if (/(burn|fire|smoke)/.test(t) && off.some((s) => s.includes("burn"))) bonus += 42;
   if (/(cardiac|chest|heart|stroke)/.test(t) && off.some((s) => s.includes("cardiac") || s.includes("cardiology"))) bonus += 38;
+
+  // AI triage vision (Gemini) — strong additional pull toward matching specialty.
+  const ai = (aiSpecialty || "").toLowerCase();
+  if (ai === "cardiac" && off.some((s) => s.includes("cardiac") || s.includes("cardiology"))) bonus += 60;
+  else if (ai === "trauma" && off.some((s) => s.includes("trauma"))) bonus += 60;
+  else if (ai === "burn" && off.some((s) => s.includes("burn"))) bonus += 60;
+  else if (ai === "pediatric" && off.some((s) => s.includes("pediatric") || s.includes("nicu"))) bonus += 60;
+  else if (ai === "stroke" && off.some((s) => s.includes("stroke") || s.includes("neuro"))) bonus += 60;
   return bonus;
 }
 
@@ -39,6 +47,14 @@ async function dispatchHospitalInHex({ incidentId, incident }) {
 
   const requiredServices = mergeRequiredServicesFromIncident(incident);
   const emergencyType = emergencyTypeLower(incident);
+  // AI triage vision hint (Gemini) — pulled from the incident document.
+  const aiSpecialty = (() => {
+    try {
+      const t = incident && incident.triage;
+      const av = t && t.aiVision;
+      return av && String(av.aiRecommendedSpecialty || "").trim().toLowerCase();
+    } catch (_) { return ""; }
+  })();
   const incidentZone = getClosestOpsZone(lat, lng);
   const incidentHex = latLngToHex(lat, lng, incidentZone);
 
@@ -97,7 +113,7 @@ async function dispatchHospitalInHex({ incidentId, incident }) {
   const tier2 = eligible.filter((c) => c.ring >= 1 && c.ring <= 5);
   const tier3 = eligible.filter((c) => c.ring > 5);
 
-  const sortTier = (arr) => arr.sort((a, b) => hospitalDispatchScore(a, requiredServices, emergencyType, relaxed) - hospitalDispatchScore(b, requiredServices, emergencyType, relaxed));
+  const sortTier = (arr) => arr.sort((a, b) => hospitalDispatchScore(a, requiredServices, emergencyType, relaxed, aiSpecialty) - hospitalDispatchScore(b, requiredServices, emergencyType, relaxed, aiSpecialty));
   sortTier(tier1); sortTier(tier2); sortTier(tier3);
 
   const tieredList = [...tier1, ...tier2, ...tier3];

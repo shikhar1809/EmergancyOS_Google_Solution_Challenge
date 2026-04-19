@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/ai_advisory_banner.dart';
 // ---------------------------------------------------------------------------
 // Triage Camera Screen — Gemini Vision Wound Analysis
 // ---------------------------------------------------------------------------
@@ -28,12 +29,18 @@ extension TriageSeverityExt on TriageSeverity {
 
 class TriageResult {
   final TriageSeverity severity;
+  final String category;
+  final String? aiRecommendedSpecialty;
+  final String confidence;
   final String analysis;
   final List<String> immediateSteps;
   final String rawResponse;
 
   const TriageResult({
     required this.severity,
+    required this.category,
+    required this.aiRecommendedSpecialty,
+    required this.confidence,
     required this.analysis,
     required this.immediateSteps,
     required this.rawResponse,
@@ -41,7 +48,13 @@ class TriageResult {
 }
 
 class TriageCameraScreen extends ConsumerStatefulWidget {
-  const TriageCameraScreen({super.key});
+  const TriageCameraScreen({super.key, this.incidentId});
+
+  /// Optional: the incident to attach AI triage onto. When provided, the
+  /// screen offers a one-tap button that writes the structured Gemini triage
+  /// vision onto `sos_incidents/{id}.triage.aiVision` and re-runs hospital
+  /// dispatch so the updated specialty recommendation reshuffles the chain.
+  final String? incidentId;
 
   @override
   ConsumerState<TriageCameraScreen> createState() => _TriageCameraScreenState();
@@ -53,12 +66,20 @@ class _TriageCameraScreenState extends ConsumerState<TriageCameraScreen> {
   TriageResult? _result;
   bool _loading = false;
   String? _error;
+  bool _attaching = false;
+  String? _attachSuccessMsg;
 
+  // Safety preamble is also enforced server-side in `analyzeTriageImage`.
+  // We keep a compact client-side task block so the model sees clear output rules.
   static const _systemPrompt = '''
-You are a trauma triage AI. Analyze the image and respond ONLY in this JSON format:
+TRIAGE TASK
+Analyze the image and respond ONLY in this JSON format (no markdown fences):
 {
   "severity": "green|yellow|red|black",
-  "analysis": "Brief clinical description of what you observe",
+  "category": "cardiac|trauma|burn|bleed|fall|drowning|fire|rta|medical|other",
+  "aiRecommendedSpecialty": "cardiac|trauma|burn|pediatric|stroke|general",
+  "confidence": "low|medium|high",
+  "analysis": "Brief clinical description of what you observe (no diagnosis)",
   "steps": ["Step 1", "Step 2", "Step 3"]
 }
 
@@ -68,9 +89,11 @@ Triage levels:
 - red: Immediate, life-threatening, treat NOW
 - black: Expectant, unsurvivable or requires resources beyond available
 
-Be clinical, specific, and actionable. Steps must be numbered first-aid actions.
-If the image is NOT a medical/injury image, respond with severity "green" and explain.
-If the image is NOT a medical/injury image, respond with severity "green" and explain.
+Rules:
+- Be clinical, specific, and actionable. Steps must be numbered first-aid actions.
+- If the image is NOT a medical/injury image, respond with severity "green", category "other", and say so in analysis.
+- Never invent injuries that are not visible. Never guess identity or diagnosis.
+- If severity is red or black, make sure "Call 112 now" is step 1.
 ''';
 
   Future<void> _pickAndAnalyze({bool fromCamera = true}) async {
@@ -99,46 +122,104 @@ If the image is NOT a medical/injury image, respond with severity "green" and ex
 
       final raw = response.data['result'] as String? ?? '';
       final result = _parseTriageResponse(raw);
-      setState(() { _result = result; _loading = false; });
+      setState(() { _result = result; _loading = false; _attachSuccessMsg = null; });
     } catch (e) {
       setState(() { _error = 'Analysis failed: $e'; _loading = false; });
     }
   }
 
-  TriageResult _parseTriageResponse(String raw) {
+  /// Writes the parsed AI triage result onto the linked incident document so
+  /// hospital dispatch can reshuffle against the recommended specialty.
+  Future<void> _attachTriageToIncident() async {
+    final incidentId = widget.incidentId;
+    final result = _result;
+    if (incidentId == null || result == null || _attaching) return;
+    setState(() { _attaching = true; _attachSuccessMsg = null; _error = null; });
     try {
-      // Extract JSON from response
-      final jsonMatch = RegExp(r'\{[\s\S]*\}').firstMatch(raw);
-      if (jsonMatch == null) throw Exception('No JSON');
-      final jsonStr = jsonMatch.group(0)!;
-      
-      // Manual parse (avoid dart:convert import issues with const)
-      final severityMatch = RegExp(r'"severity"\s*:\s*"(\w+)"').firstMatch(jsonStr);
-      final analysisMatch = RegExp(r'"analysis"\s*:\s*"([^"]+)"').firstMatch(jsonStr);
-      final stepsMatch = RegExp(r'"steps"\s*:\s*\[([^\]]+)\]').firstMatch(jsonStr);
+      final callable = FirebaseFunctions.instance.httpsCallable('applyAiTriageToIncident');
+      await callable.call({
+        'incidentId': incidentId,
+        'triage': {
+          'severity': result.severity.name,
+          'category': result.category,
+          'aiRecommendedSpecialty': result.aiRecommendedSpecialty,
+          'confidence': result.confidence,
+          'analysis': result.analysis,
+          'steps': result.immediateSteps,
+        },
+      }).timeout(const Duration(seconds: 15));
+      setState(() {
+        _attaching = false;
+        _attachSuccessMsg = 'AI triage attached to incident. Hospital dispatch will re-rank for '
+            '${result.aiRecommendedSpecialty ?? "general"} specialty.';
+      });
+    } catch (e) {
+      setState(() {
+        _attaching = false;
+        _error = 'Failed to attach AI triage: $e';
+      });
+    }
+  }
 
-      final severityStr = severityMatch?.group(1) ?? 'yellow';
-      final analysis = analysisMatch?.group(1) ?? 'See full response below.';
-      
-      List<String> steps = [];
-      if (stepsMatch != null) {
-        steps = RegExp(r'"([^"]+)"')
-            .allMatches(stepsMatch.group(1)!)
-            .map((m) => m.group(1)!)
-            .toList();
+  TriageResult _parseTriageResponse(String raw) {
+    // Server enforces responseMimeType=application/json + responseSchema, so
+    // `raw` should be a clean JSON object. The guarded decode below tolerates
+    // stray markdown fences if they ever slip through.
+    try {
+      var text = raw.trim();
+      if (text.startsWith('```json')) {
+        text = text.substring(7);
+      } else if (text.startsWith('```')) {
+        text = text.substring(3);
+      }
+      if (text.endsWith('```')) {
+        text = text.substring(0, text.length - 3);
+      }
+      text = text.trim();
+      final start = text.indexOf('{');
+      final end = text.lastIndexOf('}');
+      if (start != -1 && end != -1 && end > start) {
+        text = text.substring(start, end + 1);
+      }
+
+      final decoded = jsonDecode(text);
+      if (decoded is! Map) throw Exception('Not an object');
+
+      final severityStr = (decoded['severity'] as String?)?.trim().toLowerCase() ?? 'yellow';
+      final category = (decoded['category'] as String?)?.trim().toLowerCase() ?? 'other';
+      final specialty = (decoded['aiRecommendedSpecialty'] as String?)?.trim().toLowerCase();
+      final confidence = (decoded['confidence'] as String?)?.trim().toLowerCase() ?? 'medium';
+      final analysis = (decoded['analysis'] as String?)?.trim() ?? 'See full response below.';
+
+      final stepsRaw = decoded['steps'];
+      final steps = <String>[];
+      if (stepsRaw is List) {
+        for (final s in stepsRaw) {
+          final str = s?.toString().trim();
+          if (str != null && str.isNotEmpty) steps.add(str);
+        }
       }
 
       final severity = TriageSeverity.values.firstWhere(
-        (s) => s.name == severityStr, orElse: () => TriageSeverity.yellow);
+        (s) => s.name == severityStr,
+        orElse: () => TriageSeverity.yellow,
+      );
 
       return TriageResult(
-        severity: severity, analysis: analysis,
-        immediateSteps: steps, rawResponse: raw,
+        severity: severity,
+        category: category,
+        aiRecommendedSpecialty: (specialty != null && specialty.isNotEmpty) ? specialty : null,
+        confidence: confidence,
+        analysis: analysis,
+        immediateSteps: steps,
+        rawResponse: raw,
       );
     } catch (_) {
-      // Fallback: parse raw text
       return TriageResult(
         severity: TriageSeverity.yellow,
+        category: 'other',
+        aiRecommendedSpecialty: null,
+        confidence: 'low',
         analysis: 'Analysis complete — see details below.',
         immediateSteps: [raw],
         rawResponse: raw,
@@ -325,29 +406,73 @@ If the image is NOT a medical/injury image, respond with severity "green" and ex
                   ),
                 ),
               ],
-              const SizedBox(height: 16),
-                // AI Disclaimer
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.orangeAccent.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.2)),
-                  ),
-                  child: const Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.gavel_rounded, color: Colors.orangeAccent, size: 16),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'AI ADVISORY: Triage results are generated by Gemini Flash. This is an assistive tool, NOT a professional medical diagnosis. Decisions must be made by qualified personnel on-scene.',
-                          style: TextStyle(color: Colors.orangeAccent, fontSize: 10, height: 1.4, fontWeight: FontWeight.bold),
+              const SizedBox(height: 12),
+                // AI specialty routing chip
+                if (_result!.aiRecommendedSpecialty != null)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.cyanAccent.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.35)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.local_hospital_rounded, color: Colors.cyanAccent, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'AI-recommended hospital specialty: '
+                            '${_result!.aiRecommendedSpecialty!.toUpperCase()}  '
+                            '· confidence ${_result!.confidence}',
+                            style: const TextStyle(color: Colors.cyanAccent, fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
+                if (_result!.aiRecommendedSpecialty != null) const SizedBox(height: 12),
+
+                // Attach-to-incident action (only shown when called from an
+                // active incident context). This is the demo moment where AI
+                // triage visibly drives hospital chain reshuffling.
+                if (widget.incidentId != null) ...[
+                  ElevatedButton.icon(
+                    onPressed: _attaching ? null : _attachTriageToIncident,
+                    icon: _attaching
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.send_rounded),
+                    label: Text(_attaching ? 'Attaching…' : 'ATTACH AI TRIAGE TO INCIDENT',
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.cyanAccent.shade700,
+                      foregroundColor: Colors.black,
+                      minimumSize: const Size(double.infinity, 48),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                  if (_attachSuccessMsg != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.greenAccent.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.4)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 16),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(_attachSuccessMsg!, style: const TextStyle(color: Colors.greenAccent, fontSize: 12))),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                ],
+
+                AiAdvisoryBanner.triage(),
                 const SizedBox(height: 16),
                 // Scan Again
                 OutlinedButton.icon(

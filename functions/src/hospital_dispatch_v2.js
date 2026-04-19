@@ -255,6 +255,40 @@ function emergencySpecialtyTags(type) {
   return set;
 }
 
+/**
+ * AI-aware specialty tags. Uses Gemini triage vision output when present on
+ * the incident (`incident.triage.aiVision.aiRecommendedSpecialty`), otherwise
+ * falls back to keyword derivation from the emergency type.
+ *
+ * This is the core of the "Gemini drives dispatch" story: when the victim
+ * or bystander snaps a photo and Gemini classifies the scene, the chosen
+ * specialty is fed directly into the hospital scoring function below.
+ */
+function specialtyTagsForIncident(incident, fallbackType) {
+  const tags = emergencySpecialtyTags(fallbackType);
+  try {
+    const triage = incident && incident.triage;
+    const aiVision = triage && triage.aiVision;
+    const aiSpec = aiVision && String(aiVision.aiRecommendedSpecialty || "").trim().toLowerCase();
+    if (aiSpec) {
+      // Map the AI's coarse specialty label to concrete hospital service tags.
+      const AI_SPECIALTY_TAGS = {
+        cardiac: ["cardiac", "cardiology", "cath lab", "icu"],
+        trauma: ["trauma", "orthopedic", "emergency"],
+        burn: ["burn", "plastic", "emergency"],
+        pediatric: ["pediatric", "nicu"],
+        stroke: ["stroke", "neurology", "neuro"],
+        general: ["emergency"],
+      };
+      const extra = AI_SPECIALTY_TAGS[aiSpec] || [];
+      for (const t of extra) tags.add(t);
+    }
+  } catch (_) {
+    // AI hint is a soft signal — never let parsing failures break dispatch.
+  }
+  return tags;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Google Routes API — optional real ETA
 // Endpoint: https://routes.googleapis.com/directions/v2:computeRoutes
@@ -575,7 +609,9 @@ async function dispatchHospital({ incidentId, incident, hexFns, writeOpsAlert })
   const profile = SEVERITY_PROFILES[severity];
   const requiredServices = extractRequiredServices(incident);
   const emergencyType = String(incident.type || (incident.dispatchHints || {}).emergencyType || "").toLowerCase();
-  const specialtyTags = emergencySpecialtyTags(emergencyType);
+  // AI triage vision (Gemini) augments the keyword-derived specialty tags with
+  // model-recommended specialties like "cardiac" or "trauma".
+  const specialtyTags = specialtyTagsForIncident(incident, emergencyType);
 
   const zone = hexFns && hexFns.zoneCenter ? hexFns.zoneCenter : null;
   const incidentHex = hexFns && hexFns.latLngToHex ? hexFns.latLngToHex(lat, lng) : null;
@@ -1296,6 +1332,7 @@ module.exports = {
   classifySeverity,
   extractRequiredServices,
   emergencySpecialtyTags,
+  specialtyTagsForIncident,
   scoreCandidate,
   haversineKm,
   clamp01,

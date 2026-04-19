@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../services/situation_brief_service.dart';
 import '../theme/app_colors.dart';
+import 'ai_advisory_banner.dart';
 
 /// Live-updating card for `sos_incidents.sharedSituationBrief` (AI-generated debrief).
 class SharedSituationBriefCard extends StatelessWidget {
@@ -226,6 +227,10 @@ class SharedSituationBriefCard extends StatelessWidget {
                     style: const TextStyle(color: Colors.redAccent, fontSize: 10, height: 1.3),
                   ),
                 ),
+              if (summary.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                AiAdvisoryBanner.brief(dense: compact),
+              ],
               if (showRefreshButton && authed) ...[
                 const SizedBox(height: 6),
                 Align(

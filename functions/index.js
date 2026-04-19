@@ -444,12 +444,55 @@ exports.analyzeTriageImage = onCall(
             throw new HttpsError("failed-precondition", "GEMINI_API_KEY not set on server.");
         }
         const safePrompt = withSafetyForRole("triage", prompt);
+        // Structured output: deterministic JSON, no regex parsing needed on client.
+        const triageSchema = {
+            type: "object",
+            properties: {
+                severity: { type: "string", enum: ["green", "yellow", "red", "black"] },
+                category: {
+                    type: "string",
+                    enum: [
+                        "cardiac",
+                        "trauma",
+                        "burn",
+                        "bleed",
+                        "fall",
+                        "drowning",
+                        "fire",
+                        "rta",
+                        "medical",
+                        "other",
+                    ],
+                },
+                aiRecommendedSpecialty: {
+                    type: "string",
+                    enum: [
+                        "cardiac",
+                        "trauma",
+                        "burn",
+                        "pediatric",
+                        "stroke",
+                        "general",
+                    ],
+                },
+                confidence: { type: "string", enum: ["low", "medium", "high"] },
+                analysis: { type: "string" },
+                steps: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 6 },
+            },
+            required: ["severity", "category", "analysis", "steps"],
+        };
         const response = await g.models.generateContent({
             model: "gemini-2.5-flash",
             contents: [
                 safePrompt,
                 { inlineData: { data: base64str, mimeType: mimeType || "image/jpeg" } }
-            ]
+            ],
+            generationConfig: {
+                responseMimeType: "application/json",
+                responseSchema: triageSchema,
+                temperature: 0.2,
+                maxOutputTokens: 600,
+            },
         });
         return { result: response.text() };
     } catch (e) {
@@ -457,6 +500,115 @@ exports.analyzeTriageImage = onCall(
         throw new HttpsError("internal", "Failed to run AI triage.");
     }
 });
+
+// ─── AI triage → incident document (drives hospital specialty routing) ─────
+// Writes the structured Gemini triage vision result onto `sos_incidents/{id}`
+// under `triage.aiVision` and triggers a re-dispatch so the updated specialty
+// recommendation is actually reflected in the hospital chain.
+exports.applyAiTriageToIncident = onCall(
+    async (request) => {
+        if (!request.auth) {
+            throw new HttpsError("unauthenticated", "Sign in required to attach AI triage.");
+        }
+        const incidentId = (request.data?.incidentId || "").toString().trim();
+        if (!incidentId) {
+            throw new HttpsError("invalid-argument", "incidentId required");
+        }
+        const t = (request.data?.triage && typeof request.data.triage === "object") ? request.data.triage : null;
+        if (!t) {
+            throw new HttpsError("invalid-argument", "triage payload required");
+        }
+
+        const allowedSeverity = new Set(["green", "yellow", "red", "black"]);
+        const allowedSpecialty = new Set(["cardiac", "trauma", "burn", "pediatric", "stroke", "general"]);
+        const severity = allowedSeverity.has(String(t.severity || "").toLowerCase())
+            ? String(t.severity).toLowerCase()
+            : "yellow";
+        const category = String(t.category || "other").toLowerCase().slice(0, 32);
+        const specialty = allowedSpecialty.has(String(t.aiRecommendedSpecialty || "").toLowerCase())
+            ? String(t.aiRecommendedSpecialty).toLowerCase()
+            : null;
+        const confidence = String(t.confidence || "medium").toLowerCase();
+        const analysis = String(t.analysis || "").slice(0, 1200);
+        const stepsRaw = Array.isArray(t.steps) ? t.steps : [];
+        const steps = stepsRaw.map((s) => String(s || "").slice(0, 400)).filter(Boolean).slice(0, 8);
+
+        const ref = db.collection("sos_incidents").doc(incidentId);
+        const snap = await ref.get();
+        if (!snap.exists) {
+            throw new HttpsError("not-found", "Incident not found.");
+        }
+        const inc = snap.data() || {};
+        if (inc.userId && inc.userId !== request.auth.uid) {
+            // Victims update their own incident; volunteers/admins may also attach if accepted.
+            const accepted = Array.isArray(inc.acceptedVolunteerIds) ? inc.acceptedVolunteerIds.map(String) : [];
+            const isMaster = isMasterConsoleEmailToken(request.auth.token);
+            if (!accepted.includes(request.auth.uid) && !isMaster) {
+                throw new HttpsError("permission-denied", "You cannot attach AI triage to this incident.");
+            }
+        }
+
+        const aiVision = {
+            severity,
+            category,
+            aiRecommendedSpecialty: specialty,
+            confidence,
+            analysis,
+            steps,
+            capturedAt: FieldValue.serverTimestamp(),
+            capturedBy: request.auth.uid,
+        };
+
+        // Merge into existing self-reported triage block without clobbering it.
+        const existingTriage = (inc.triage && typeof inc.triage === "object") ? inc.triage : {};
+        const mergedTriage = { ...existingTriage, aiVision };
+
+        const updates = {
+            triage: mergedTriage,
+            aiTriageAt: FieldValue.serverTimestamp(),
+        };
+        // Mirror the severity color for downstream severity classifiers.
+        if (severity === "red") updates.triageColor = "red";
+        else if (severity === "yellow") updates.triageColor = "orange";
+
+        // Nudge required services so the hospital scorer treats the specialty
+        // as a soft requirement (keeps existing services list intact).
+        if (specialty && specialty !== "general") {
+            const current = Array.isArray(inc.requiredServices) ? inc.requiredServices.map(String) : [];
+            const mustHave = specialty === "cardiac" ? "cardiac"
+                : specialty === "trauma" ? "trauma"
+                : specialty === "burn" ? "burn"
+                : specialty === "pediatric" ? "pediatric"
+                : specialty === "stroke" ? "stroke"
+                : null;
+            if (mustHave && !current.map((s) => s.toLowerCase()).includes(mustHave)) {
+                updates.requiredServices = [...current, mustHave];
+            }
+        }
+
+        await ref.set(updates, { merge: true });
+
+        // Trigger hospital re-dispatch so the new specialty actually reshuffles
+        // the candidate list. `dispatchHospital` is idempotent on re-run.
+        try {
+            const fresh = (await ref.get()).data() || {};
+            await hospitalDispatchV2.dispatchHospital({
+                incidentId,
+                incident: fresh,
+            });
+        } catch (e) {
+            console.warn("[applyAiTriageToIncident] re-dispatch failed:", e?.message || e);
+            // Not fatal — the triage block is already on the incident doc.
+        }
+
+        return {
+            ok: true,
+            severity,
+            category,
+            aiRecommendedSpecialty: specialty,
+        };
+    }
+);
 
 // FIX 8: Static offline protocol fallback when Gemini is rate-limited or unavailable.
 const LIFELINE_OFFLINE_PROTOCOLS = {
@@ -623,10 +775,27 @@ exports.lifelineChat = onCall(
                 };
             }
             let response;
+            // Voice-assistant replies are now strictly schema-constrained so the
+            // client never has to regex-parse JSON out of free text.
+            const voiceAssistantSchema = {
+                type: "object",
+                properties: {
+                    spoken: { type: "string" },
+                    openLibraryLevelId: { type: ["integer", "null"] },
+                },
+                required: ["spoken"],
+            };
             const gen = isAnalytics
                 ? { maxOutputTokens: 2048, temperature: 0.3 }
                 : isTraining
-                  ? { maxOutputTokens: isVoiceAssistant ? 720 : 640, temperature: 0.25 }
+                  ? isVoiceAssistant
+                    ? {
+                        maxOutputTokens: 720,
+                        temperature: 0.25,
+                        responseMimeType: "application/json",
+                        responseSchema: voiceAssistantSchema,
+                      }
+                    : { maxOutputTokens: 640, temperature: 0.25 }
                   : { maxOutputTokens: 180, temperature: 0.2 };
             if (base64Image && typeof base64Image === "string") {
                 response = await g.models.generateContent({
