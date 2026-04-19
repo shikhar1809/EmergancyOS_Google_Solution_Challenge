@@ -2,7 +2,17 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const crypto = require("crypto");
 const textToSpeech = require("@google-cloud/text-to-speech");
 
-const ttsClient = new textToSpeech.TextToSpeechClient();
+/** Lazy client — constructing TextToSpeechClient at module load runs gRPC
+ *  credential discovery and can exceed Firebase's 10s deploy-time analysis
+ *  timeout ("User code failed to load"). Instantiate on first synthesis only.
+ */
+let ttsClient;
+function getTtsClient() {
+  if (!ttsClient) {
+    ttsClient = new textToSpeech.TextToSpeechClient();
+  }
+  return ttsClient;
+}
 
 /** Small LRU to cut duplicate billing for repeated prompts. */
 const _cache = new Map();
@@ -58,7 +68,7 @@ exports.synthesizeSpeech = onCall(
       return { audioBase64: hit, mime: "audio/mpeg", cached: true };
     }
     try {
-      const [resp] = await ttsClient.synthesizeSpeech({
+      const [resp] = await getTtsClient().synthesizeSpeech({
         input: { text: t },
         voice: {
           languageCode: lang,
