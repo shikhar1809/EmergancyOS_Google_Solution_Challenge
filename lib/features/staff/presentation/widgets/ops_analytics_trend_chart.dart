@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 /// Seven vertical bars: index 0 = oldest day, 6 = today (local calendar days).
 class OpsAnalyticsTrendChart extends StatelessWidget {
@@ -34,9 +35,7 @@ class OpsAnalyticsTrendChart extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '7-day incident trend (zone)',
-            style: TextStyle(color: AppColors.accentBlue, fontWeight: FontWeight.w800, fontSize: 10),
+          Text(context.opsTr('7-day incident trend (zone)'), style: TextStyle(color: AppColors.accentBlue, fontWeight: FontWeight.w800, fontSize: 10),
           ),
           const SizedBox(height: 8),
           SizedBox(

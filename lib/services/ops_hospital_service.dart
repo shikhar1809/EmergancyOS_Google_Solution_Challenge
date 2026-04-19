@@ -260,6 +260,22 @@ class OpsHospitalService {
     );
   }
 
+  /// Master Management: update GPS pin only (merge; does not touch credentials).
+  static Future<void> updateMapCoordinates({
+    required String id,
+    required double lat,
+    required double lng,
+  }) async {
+    await _db.collection(_col).doc(id.trim()).set(
+      {
+        'lat': lat,
+        'lng': lng,
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+  }
+
   static Future<void> updateLiveOpsFull({
     required String id,
     required int bedsAvailable,

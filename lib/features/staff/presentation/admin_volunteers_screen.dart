@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -59,10 +61,10 @@ class _AdminVolunteersScreenState extends State<AdminVolunteersScreen>
                 children: [
                   Icon(Icons.person_rounded, color: _accent, size: 28),
                   const SizedBox(width: 12),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'Volunteer Management',
-                      style: TextStyle(
+                      context.opsTr('Volunteer Management'),
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 22,
                         fontWeight: FontWeight.w800,
@@ -72,11 +74,13 @@ class _AdminVolunteersScreenState extends State<AdminVolunteersScreen>
                 ],
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 24),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Text(
-                'Approvals: review uploaded certificates. Lookup: find any volunteer by UID or email, moderate, and inspect incidents & submissions.',
-                style: TextStyle(
+                context.opsTr(
+                  'Approvals: review uploaded certificates. Lookup: find any volunteer by UID or email, moderate, and inspect incidents & submissions.',
+                ),
+                style: const TextStyle(
                   color: Colors.white54,
                   fontSize: 13,
                   height: 1.35,
@@ -188,8 +192,8 @@ Future<void> adminConfirmBan(
           TextField(
             controller: ctrl,
             style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              labelText: 'Reason (optional)',
+            decoration: InputDecoration(
+              labelText: context.opsTr('Reason (optional)'),
               labelStyle: TextStyle(color: Colors.white54),
               enabledBorder: OutlineInputBorder(
                 borderSide: BorderSide(color: Colors.white24),
@@ -204,14 +208,14 @@ Future<void> adminConfirmBan(
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(ctx, false),
-          child: const Text('Cancel'),
+          child: Text(context.opsTr('Cancel')),
         ),
         FilledButton(
           style: FilledButton.styleFrom(
             backgroundColor: Colors.orange.shade800,
           ),
           onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('Suspend'),
+          child: Text(context.opsTr('Suspend')),
         ),
       ],
     ),
@@ -307,8 +311,8 @@ class _VolunteerApprovalsTab extends StatelessWidget {
       await _markUploadReviewed(uploadId, status: 'approved');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Approved — profile flags updated.'),
+          SnackBar(
+            content: Text(context.opsTr('Approved — profile flags updated.')),
             backgroundColor: Color(0xFF2E7D32),
           ),
         );
@@ -328,27 +332,25 @@ class _VolunteerApprovalsTab extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.slate800,
-        title: const Text(
-          'Reject upload?',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+        title: Text(context.opsTr('Reject upload?'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
         ),
         content: TextField(
           controller: ctrl,
           style: const TextStyle(color: Colors.white),
           maxLines: 2,
-          decoration: const InputDecoration(
-            labelText: 'Note to log (optional)',
+          decoration: InputDecoration(
+            labelText: context.opsTr('Note to log (optional)'),
             labelStyle: TextStyle(color: Colors.white54),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(context.opsTr('Cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Reject'),
+            child: Text(context.opsTr('Reject')),
           ),
         ],
       ),
@@ -363,7 +365,7 @@ class _VolunteerApprovalsTab extends StatelessWidget {
         if (context.mounted) {
           ScaffoldMessenger.of(
             context,
-          ).showSnackBar(const SnackBar(content: Text('Marked rejected.')));
+          ).showSnackBar(SnackBar(content: Text(context.opsTr('Marked rejected.'))));
         }
       } catch (e) {
         if (context.mounted) {
@@ -476,9 +478,7 @@ class _VolunteerApprovalsTab extends StatelessWidget {
                                 color: Colors.amber.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(8),
                               ),
-                              child: const Text(
-                                'NEEDS REVIEW',
-                                style: TextStyle(
+                              child: Text(context.opsTr('NEEDS REVIEW'), style: TextStyle(
                                   color: Colors.amberAccent,
                                   fontWeight: FontWeight.w800,
                                   fontSize: 11,
@@ -519,9 +519,7 @@ class _VolunteerApprovalsTab extends StatelessWidget {
                                   color: Colors.orange.withValues(alpha: 0.25),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
-                                child: const Text(
-                                  'SUSPENDED',
-                                  style: TextStyle(
+                                child: Text(context.opsTr('SUSPENDED'), style: TextStyle(
                                     color: Colors.orangeAccent,
                                     fontWeight: FontWeight.w800,
                                     fontSize: 11,
@@ -595,7 +593,7 @@ class _VolunteerApprovalsTab extends StatelessWidget {
                                   foregroundColor: accent,
                                 ),
                                 icon: const Icon(Icons.open_in_new, size: 18),
-                                label: const Text('Open file'),
+                                label: Text(context.opsTr('Open file')),
                               ),
                             FilledButton.icon(
                               onPressed: banned
@@ -608,7 +606,7 @@ class _VolunteerApprovalsTab extends StatelessWidget {
                                 Icons.check_circle_outline,
                                 size: 18,
                               ),
-                              label: const Text('Approve'),
+                              label: Text(context.opsTr('Approve')),
                             ),
                             FilledButton.icon(
                               onPressed: () => _reject(context, d.id),
@@ -616,7 +614,7 @@ class _VolunteerApprovalsTab extends StatelessWidget {
                                 backgroundColor: Colors.red.shade900,
                               ),
                               icon: const Icon(Icons.cancel_outlined, size: 18),
-                              label: const Text('Reject'),
+                              label: Text(context.opsTr('Reject')),
                             ),
                           ],
                         ),
@@ -791,9 +789,7 @@ class _VolunteerLookupTabState extends State<_VolunteerLookupTab> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.slate800,
-        title: const Text(
-          'Revoke certification?',
-          style: TextStyle(color: Colors.white),
+        title: Text(context.opsTr('Revoke certification?'), style: TextStyle(color: Colors.white),
         ),
         content: Text(
           cpr && aed
@@ -806,11 +802,11 @@ class _VolunteerLookupTabState extends State<_VolunteerLookupTab> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(context.opsTr('Cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Revoke'),
+            child: Text(context.opsTr('Revoke')),
           ),
         ],
       ),
@@ -829,7 +825,7 @@ class _VolunteerLookupTabState extends State<_VolunteerLookupTab> {
       if (mounted) {
         setState(() => _userData = snap.data());
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Certification flags updated.')),
+          SnackBar(content: Text(context.opsTr('Certification flags updated.'))),
         );
       }
     } catch (e) {
@@ -853,9 +849,9 @@ class _VolunteerLookupTabState extends State<_VolunteerLookupTab> {
                 controller: _searchCtrl,
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
-                  labelText: 'UID or email',
+                  labelText: context.opsTr('UID or email'),
                   labelStyle: const TextStyle(color: Colors.white54),
-                  hintText: 'Paste Firebase Auth UID or exact account email',
+                  hintText: context.opsTr('Paste Firebase Auth UID or exact account email'),
                   hintStyle: TextStyle(
                     color: Colors.white.withValues(alpha: 0.28),
                   ),
@@ -865,7 +861,7 @@ class _VolunteerLookupTabState extends State<_VolunteerLookupTab> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   suffixIcon: IconButton(
-                    tooltip: 'Search',
+                    tooltip: context.opsTr('Search'),
                     icon: _loading
                         ? const SizedBox(
                             width: 22,
@@ -893,7 +889,7 @@ class _VolunteerLookupTabState extends State<_VolunteerLookupTab> {
                 ),
               ),
               icon: const Icon(Icons.search),
-              label: const Text('Search'),
+              label: Text(context.opsTr('Search')),
             ),
           ],
         ),
@@ -932,9 +928,7 @@ class _VolunteerLookupTabState extends State<_VolunteerLookupTab> {
           ),
           const SizedBox(height: 8),
           if (_incidents.isEmpty)
-            const Text(
-              'No incidents in active or archive collections for this UID.',
-              style: TextStyle(color: Colors.white38),
+            Text(context.opsTr('No incidents in active or archive collections for this UID.'), style: TextStyle(color: Colors.white38),
             )
           else
             ..._incidents
@@ -962,9 +956,7 @@ class _VolunteerLookupTabState extends State<_VolunteerLookupTab> {
           ),
           const SizedBox(height: 8),
           if (_feedbackDocs.isEmpty)
-            const Text(
-              'No incident_feedback rows for the incidents above (anonymous payloads may omit submitter).',
-              style: TextStyle(color: Colors.white38, fontSize: 12),
+            Text(context.opsTr('No incident_feedback rows for the incidents above (anonymous payloads may omit submitter).'), style: TextStyle(color: Colors.white38, fontSize: 12),
             )
           else
             ..._feedbackDocs.map((d) => _FeedbackTile(doc: d)),
@@ -1010,9 +1002,7 @@ class _VolunteerLookupTabState extends State<_VolunteerLookupTab> {
                   return tb.compareTo(ta);
                 });
               if (docs.isEmpty) {
-                return const Text(
-                  'No uploads for this user.',
-                  style: TextStyle(color: Colors.white38),
+                return Text(context.opsTr('No uploads for this user.'), style: TextStyle(color: Colors.white38),
                 );
               }
               return Column(
@@ -1114,9 +1104,7 @@ class _LookupProfileCard extends StatelessWidget {
                       color: Colors.orange.withValues(alpha: 0.25),
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: const Text(
-                      'SUSPENDED',
-                      style: TextStyle(
+                    child: Text(context.opsTr('SUSPENDED'), style: TextStyle(
                         color: Colors.orangeAccent,
                         fontWeight: FontWeight.w800,
                         fontSize: 11,
@@ -1178,7 +1166,7 @@ class _LookupProfileCard extends StatelessWidget {
                       backgroundColor: Colors.orange.shade800,
                     ),
                     icon: const Icon(Icons.block, size: 18),
-                    label: const Text('Suspend'),
+                    label: Text(context.opsTr('Suspend')),
                   )
                 else
                   FilledButton.icon(
@@ -1187,7 +1175,7 @@ class _LookupProfileCard extends StatelessWidget {
                       backgroundColor: const Color(0xFF2E7D32),
                     ),
                     icon: const Icon(Icons.check_circle_outline, size: 18),
-                    label: const Text('Lift suspension'),
+                    label: Text(context.opsTr('Lift suspension')),
                   ),
                 OutlinedButton.icon(
                   onPressed: cpr ? onRevokeCpr : null,
@@ -1195,7 +1183,7 @@ class _LookupProfileCard extends StatelessWidget {
                     foregroundColor: Colors.redAccent,
                   ),
                   icon: const Icon(Icons.undo, size: 18),
-                  label: const Text('Revoke CPR flag'),
+                  label: Text(context.opsTr('Revoke CPR flag')),
                 ),
                 OutlinedButton.icon(
                   onPressed: aed ? onRevokeAed : null,
@@ -1203,7 +1191,7 @@ class _LookupProfileCard extends StatelessWidget {
                     foregroundColor: Colors.redAccent,
                   ),
                   icon: const Icon(Icons.undo, size: 18),
-                  label: const Text('Revoke AED flag'),
+                  label: Text(context.opsTr('Revoke AED flag')),
                 ),
                 OutlinedButton.icon(
                   onPressed: (cpr || aed) ? onRevokeAllCerts : null,
@@ -1211,7 +1199,7 @@ class _LookupProfileCard extends StatelessWidget {
                     foregroundColor: Colors.deepOrange,
                   ),
                   icon: const Icon(Icons.delete_outline, size: 18),
-                  label: const Text('Revoke both'),
+                  label: Text(context.opsTr('Revoke both')),
                 ),
               ],
             ),
@@ -1275,9 +1263,7 @@ class _IncidentVolunteerTile extends StatelessWidget {
           ),
           if (hasScene) ...[
             const SizedBox(height: 8),
-            const Text(
-              'On-scene submission (volunteerSceneReport)',
-              style: TextStyle(color: Colors.cyanAccent, fontSize: 11),
+            Text(context.opsTr('On-scene submission (volunteerSceneReport)'), style: TextStyle(color: Colors.cyanAccent, fontSize: 11),
             ),
             const SizedBox(height: 4),
             SelectableText(

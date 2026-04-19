@@ -1,10 +1,13 @@
+// Command-center inspector keeps a few private helpers reserved for the
+// forthcoming video-assessment and fleet detail rows.
+// ignore_for_file: unused_element
+
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -21,11 +24,11 @@ import '../../../../features/map/domain/emergency_zone_classification.dart';
 import '../../../../services/fleet_unit_service.dart';
 import '../../../../services/incident_service.dart';
 import '../../../../services/incident_report_service.dart';
-import '../../../../services/family_alert_service.dart';
 import '../../../../services/ops_incident_hospital_assignment_service.dart';
-import '../../../../services/connectivity_service.dart';
 import '../../../../services/gemini_dispatch_advisory_service.dart';
-import '../../../ptt/data/ptt_service.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
+
+import 'command_center_shared_widgets.dart';
 
 /// Full incident control surface: mirrors victim SOS + volunteer consignment fields with one-tap actions.
 class CommandCenterInspector extends StatefulWidget {
@@ -130,7 +133,10 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
     if (closest.isEmpty) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 10),
-        child: Text('No available $title units in zone with live GPS.', style: const TextStyle(color: Colors.white38, fontSize: 10)),
+        child: Text(
+          context.opsTr('No available {title} units in zone with live GPS.').replaceAll('{title}', title),
+          style: const TextStyle(color: Colors.white38, fontSize: 10),
+        ),
       );
     }
     return Padding(
@@ -166,7 +172,7 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                       visualDensity: VisualDensity.compact,
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     ),
-                    child: const Text('Allot', style: TextStyle(fontSize: 10)),
+                    child: Text(context.opsTr('Allot'), style: TextStyle(fontSize: 10)),
                   ),
                 ],
               ),
@@ -225,6 +231,21 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
     }
     if (inc.emsOnSceneAt != null) {
       entries.add((t: inc.emsOnSceneAt!, line: 'EMS on scene'));
+    }
+    if (inc.emsRescueCompleteAt != null) {
+      entries.add((t: inc.emsRescueCompleteAt!, line: 'Rescue complete (scene)'));
+    }
+    if (inc.emsReturningStartedAt != null) {
+      entries.add((t: inc.emsReturningStartedAt!, line: 'Returning to hospital'));
+    }
+    if (inc.emsHospitalArrivalAt != null) {
+      entries.add((t: inc.emsHospitalArrivalAt!, line: 'Arrived at hospital'));
+    }
+    if (inc.emsResponseCompleteAt != null) {
+      final total = inc.emsResponseCompleteAt!.difference(inc.timestamp);
+      final m = total.inMinutes;
+      final s = total.inSeconds % 60;
+      entries.add((t: inc.emsResponseCompleteAt!, line: 'Response complete · total cycle ${m}m ${s}s'));
     }
     if (inc.acceptedVolunteerIds.isNotEmpty) {
       entries.add((t: inc.volunteerUpdatedAt ?? inc.timestamp, line: 'Volunteers accepted: ${inc.acceptedVolunteerIds.length}'));
@@ -348,7 +369,7 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
           FilledButton.icon(
             onPressed: () => context.push('/ptt-channel/${Uri.encodeComponent('ops_$driverId')}?type=fleet_operations'),
             icon: const Icon(Icons.headset_mic, size: 14),
-            label: const Text('Connect to Driver', style: TextStyle(fontSize: 10)),
+            label: Text(context.opsTr('Connect to Driver'), style: TextStyle(fontSize: 10)),
             style: FilledButton.styleFrom(
               visualDensity: VisualDensity.compact,
               backgroundColor: AppColors.accentBlue,
@@ -440,7 +461,7 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
           style: const TextStyle(color: Colors.white70),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(context.opsTr('Cancel'))),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: AppColors.primaryDanger),
@@ -469,17 +490,15 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.slate800,
-        title: const Text('Stop operation (false alarm)?', style: TextStyle(color: Colors.white)),
-        content: const Text(
-          'Archives as cancelled (false alarm). Removes the incident from the active list; responder closure XP may differ from a resolved stop.',
-          style: TextStyle(color: Colors.white70),
+        title: Text(context.opsTr('Stop operation (false alarm)?'), style: TextStyle(color: Colors.white)),
+        content: Text(context.opsTr('Archives as cancelled (false alarm). Removes the incident from the active list; responder closure XP may differ from a resolved stop.'), style: TextStyle(color: Colors.white70),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(context.opsTr('Cancel'))),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: AppColors.primaryDanger),
-            child: const Text('Confirm false alarm'),
+            child: Text(context.opsTr('Confirm false alarm')),
           ),
         ],
       ),
@@ -507,7 +526,7 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
       builder: (ctx) {
         return AlertDialog(
           backgroundColor: AppColors.slate900,
-          title: const Text('Victim medical card', style: TextStyle(color: Colors.white)),
+          title: Text(context.opsTr('Victim medical card'), style: TextStyle(color: Colors.white)),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -561,7 +580,7 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Close'),
+              child: Text(context.opsTr('Close')),
             ),
           ],
         );
@@ -603,12 +622,12 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                     '/master-dashboard?focus=${Uri.encodeComponent(inc.id)}&comms=${Uri.encodeComponent('operation')}',
                   );
                 },
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.headset_mic_rounded, size: 18),
                     SizedBox(width: 6),
-                    Text('Operation channel'),
+                    Text(context.opsTr('Operation channel')),
                   ],
                 ),
               ),
@@ -618,12 +637,12 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                     '/master-dashboard?focus=${Uri.encodeComponent(inc.id)}&comms=${Uri.encodeComponent('emergency')}',
                   );
                 },
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.campaign_rounded, size: 18),
                     SizedBox(width: 6),
-                    Text('Emergency channel'),
+                    Text(context.opsTr('Emergency channel')),
                   ],
                 ),
               ),
@@ -642,12 +661,10 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Status overview',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13),
+                Text(context.opsTr('Status overview'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13),
                 ),
                 const SizedBox(height: 6),
-                _statusLine('EMS inbound', _emsInboundLabel(inc)),
+                _statusLine('EMS', emsWorkflowPhaseShortLabel(inc.emsWorkflowPhase)),
                 StreamBuilder<OpsIncidentHospitalAssignment?>(
                   stream: OpsIncidentHospitalAssignmentService.watchForIncident(inc.id),
                   builder: (context, asSnap) {
@@ -681,14 +698,10 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Hospital & ambulance dispatch',
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12),
+                        Text(context.opsTr('Hospital & ambulance dispatch'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12),
                         ),
                         const SizedBox(height: 6),
-                        const Text(
-                          'No hospital assignment document yet. Start or refresh the notify chain from the incident location.',
-                          style: TextStyle(color: Colors.white54, fontSize: 11, height: 1.35),
+                        Text(context.opsTr('No hospital assignment document yet. Start or refresh the notify chain from the incident location.'), style: TextStyle(color: Colors.white54, fontSize: 11, height: 1.35),
                         ),
                         const SizedBox(height: 8),
                         FilledButton.tonal(
@@ -700,7 +713,7 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                                   height: 18,
                                   child: CircularProgressIndicator(strokeWidth: 2),
                                 )
-                              : const Text('Restart hospital dispatch', style: TextStyle(fontSize: 11)),
+                              : Text(context.opsTr('Restart hospital dispatch'), style: TextStyle(fontSize: 11)),
                         ),
                       ],
                     ),
@@ -733,9 +746,7 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Hospital & ambulance dispatch',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12),
+                      Text(context.opsTr('Hospital & ambulance dispatch'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12),
                       ),
                       const SizedBox(height: 6),
                       Text(
@@ -773,12 +784,12 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                                 backgroundColor: Colors.green.shade700,
                                 visualDensity: VisualDensity.compact,
                               ),
-                              child: const Text('Accept dispatch', style: TextStyle(fontSize: 11)),
+                              child: Text(context.opsTr('Accept dispatch'), style: TextStyle(fontSize: 11)),
                             ),
                             OutlinedButton(
                               onPressed: _hospitalDispatchBusy ? null : () => _declineHospitalDispatch(bound),
                               style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
-                              child: const Text('Decline', style: TextStyle(fontSize: 11)),
+                              child: Text(context.opsTr('Decline'), style: TextStyle(fontSize: 11)),
                             ),
                           ],
                         ),
@@ -795,12 +806,12 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                                 backgroundColor: Colors.green.shade700,
                                 visualDensity: VisualDensity.compact,
                               ),
-                              child: const Text('Accept dispatch', style: TextStyle(fontSize: 11)),
+                              child: Text(context.opsTr('Accept dispatch'), style: TextStyle(fontSize: 11)),
                             ),
                             OutlinedButton(
                               onPressed: _hospitalDispatchBusy ? null : () => _declineHospitalDispatch(notified),
                               style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
-                              child: const Text('Notify next hospital', style: TextStyle(fontSize: 11)),
+                              child: Text(context.opsTr('Notify next hospital'), style: TextStyle(fontSize: 11)),
                             ),
                           ],
                         ),
@@ -818,36 +829,133 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                                   height: 18,
                                   child: CircularProgressIndicator(strokeWidth: 2),
                                 )
-                              : const Text('Restart hospital dispatch', style: TextStyle(fontSize: 11)),
+                              : Text(context.opsTr('Restart hospital dispatch'), style: TextStyle(fontSize: 11)),
                         ),
                       ],
-                      const SizedBox(height: 4),
-                      TextButton.icon(
-                        onPressed: _geminiHospitalExplainLoading ? null : () => _loadGeminiHospitalExplain(a),
-                        icon: const Icon(Icons.auto_awesome, size: 14, color: Color(0xFF536DFE)),
-                        label: Text(
-                          _geminiHospitalExplainText != null ? 'Refresh routing brief' : 'Routing brief (Gemini)',
-                          style: const TextStyle(fontSize: 10, color: Color(0xFF536DFE)),
+                      const SizedBox(height: 8),
+                      // ── Gemini routing brief card ──────────────────────────
+                      // Promoted from a 10px text blob to a proper titled card
+                      // so the AI output actually reads as an AI product, not
+                      // a debug log. Still compact, but legible on 1080p demos.
+                      Container(
+                        padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              const Color(0xFF536DFE).withValues(alpha: 0.10),
+                              const Color(0xFF536DFE).withValues(alpha: 0.02),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: const Color(0xFF536DFE).withValues(alpha: 0.25),
+                            width: 1,
+                          ),
                         ),
-                        style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: EdgeInsets.zero),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.auto_awesome,
+                                    size: 14, color: Color(0xFF8FA1FF)),
+                                const SizedBox(width: 6),
+                                const Text(
+                                  'Gemini routing brief',
+                                  style: TextStyle(
+                                    color: Color(0xFF8FA1FF),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.3,
+                                  ),
+                                ),
+                                const Spacer(),
+                                TextButton.icon(
+                                  onPressed: _geminiHospitalExplainLoading
+                                      ? null
+                                      : () => _loadGeminiHospitalExplain(a),
+                                  icon: Icon(
+                                    _geminiHospitalExplainText != null
+                                        ? Icons.refresh_rounded
+                                        : Icons.play_arrow_rounded,
+                                    size: 14,
+                                    color: const Color(0xFF8FA1FF),
+                                  ),
+                                  label: Text(
+                                    _geminiHospitalExplainText != null
+                                        ? 'Refresh'
+                                        : 'Generate',
+                                    style: const TextStyle(
+                                        fontSize: 10,
+                                        color: Color(0xFF8FA1FF),
+                                        fontWeight: FontWeight.w700),
+                                  ),
+                                  style: TextButton.styleFrom(
+                                    visualDensity: VisualDensity.compact,
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    minimumSize: const Size(0, 26),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (_geminiHospitalExplainLoading)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Row(
+                                  children: [
+                                    const SizedBox(
+                                      width: 12,
+                                      height: 12,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Color(0xFF8FA1FF)),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Thinking through the dispatch…',
+                                      style: TextStyle(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.55),
+                                        fontSize: 11,
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            else if (_geminiHospitalExplainText != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: SelectableText(
+                                  _geminiHospitalExplainText!.trim(),
+                                  style: TextStyle(
+                                    color: Colors.white
+                                        .withValues(alpha: 0.88),
+                                    fontSize: 12.5,
+                                    height: 1.42,
+                                    letterSpacing: 0.1,
+                                  ),
+                                ),
+                              )
+                            else
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text(
+                                  'Tap generate for an AI explanation of why this '
+                                  'hospital was routed and what ops should watch for.',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.45),
+                                    fontSize: 10.5,
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
-                      if (_geminiHospitalExplainLoading)
-                        const Padding(
-                          padding: EdgeInsets.only(top: 4),
-                          child: SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF536DFE)),
-                          ),
-                        )
-                      else if (_geminiHospitalExplainText != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            _geminiHospitalExplainText!,
-                            style: const TextStyle(color: Colors.white54, fontSize: 10, height: 1.35),
-                          ),
-                        ),
                     ],
                   ),
                 ),
@@ -960,7 +1068,7 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                       child: OutlinedButton.icon(
                         onPressed: () => _showVictimCardDialog(inc),
                         icon: const Icon(Icons.qr_code, size: 16),
-                        label: const Text('QR / share card', style: TextStyle(fontSize: 11)),
+                        label: Text(context.opsTr('QR / share card'), style: TextStyle(fontSize: 11)),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -975,7 +1083,7 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                           }
                         },
                         icon: const Icon(Icons.description, size: 16),
-                        label: const Text('Generate report', style: TextStyle(fontSize: 11)),
+                        label: Text(context.opsTr('Generate report'), style: TextStyle(fontSize: 11)),
                       ),
                     ),
                   ],
@@ -1041,8 +1149,8 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                 }
                 final docs = snap.data!.docs;
                 if (docs.isEmpty) {
-                  return const Center(
-                    child: Text('No activity yet.', style: TextStyle(color: Colors.white38, fontSize: 11)),
+                  return Center(
+                    child: Text(context.opsTr('No activity yet.'), style: TextStyle(color: Colors.white38, fontSize: 11)),
                   );
                 }
                 return ListView.separated(
@@ -1072,7 +1180,7 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                 ),
               ),
               const SizedBox(width: 6),
-              FilledButton(onPressed: _postBroadcast, child: const Text('Send')),
+              FilledButton(onPressed: _postBroadcast, child: Text(context.opsTr('Send'))),
             ],
           ),
           const SizedBox(height: 14),
@@ -1091,7 +1199,7 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
           ),
           Align(
             alignment: Alignment.centerRight,
-            child: TextButton(onPressed: widget.onSaveNote, child: const Text('Save note')),
+            child: TextButton(onPressed: widget.onSaveNote, child: Text(context.opsTr('Save note'))),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
@@ -1110,7 +1218,7 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
               onPressed: _confirmCancelFalseAlarm,
               style: OutlinedButton.styleFrom(foregroundColor: Colors.orangeAccent),
               icon: const Icon(Icons.warning_amber_rounded, size: 18),
-              label: const Text('Stop operation — false alarm'),
+              label: Text(context.opsTr('Stop operation — false alarm')),
             ),
           ],
         ],
@@ -1143,22 +1251,15 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
     );
   }
 
-  String _emsInboundLabel(SosIncident inc) {
-    final phase = (inc.emsWorkflowPhase ?? '').trim();
-    if (phase.isEmpty) return 'Not started';
-    if (phase == 'inbound') return 'Yes — ambulance en route';
-    if (phase == 'on_scene') return 'On scene';
-    return phase;
-  }
-
   String _assignedHospitalLabelFromAssignment(OpsIncidentHospitalAssignment? a) {
-    if (a == null) return 'No dispatch record yet';
+    if (a == null) return 'Not assigned';
     final st = (a.dispatchStatus ?? '').trim();
     if (st == 'accepted') {
-      final name = (a.acceptedHospitalName ?? '').trim();
-      if (name.isNotEmpty) return '$name (accepted)';
       final id = (a.acceptedHospitalId ?? '').trim();
-      if (id.isNotEmpty) return '$id (accepted)';
+      final name = (a.acceptedHospitalName ?? '').trim();
+      final code = id.isNotEmpty ? id : '—';
+      if (name.isNotEmpty) return '$name · code $code';
+      return 'code $code';
     }
     if (st == 'pending_acceptance') {
       final n = (a.notifiedHospitalName ?? '').trim();

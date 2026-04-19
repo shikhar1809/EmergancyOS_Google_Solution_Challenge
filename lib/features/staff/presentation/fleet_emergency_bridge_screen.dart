@@ -5,8 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:livekit_client/livekit_client.dart';
 
+import '../../../core/widgets/language_switcher_button.dart';
 import '../../../core/widgets/livekit_voice_party_strip.dart';
 import '../../../services/livekit_emergency_bridge_service.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 /// LiveKit **emergency_bridge** room — same WebRTC space as victim and responders (not Firebase PTT).
 class FleetEmergencyBridgeScreen extends StatefulWidget {
@@ -170,8 +172,9 @@ class _FleetEmergencyBridgeScreenState extends State<FleetEmergencyBridgeScreen>
       backgroundColor: const Color(0xFF0D1117),
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
-        title: const Text('Emergency channel (LiveKit)'),
+        title: Text(context.opsTr('Emergency channel (LiveKit)')),
         actions: [
+          const LanguageSwitcherButton(),
           if (connected)
             IconButton(
               icon: Icon(_micOn ? Icons.mic : Icons.mic_off),
@@ -190,9 +193,7 @@ class _FleetEmergencyBridgeScreenState extends State<FleetEmergencyBridgeScreen>
                 style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Same LiveKit room as the victim and on-scene responders. Use mute when not speaking.',
-                style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.35),
+              Text(context.opsTr('Same LiveKit room as the victim and on-scene responders. Use mute when not speaking.'), style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.35),
               ),
               const SizedBox(height: 20),
               if (connected) ...[

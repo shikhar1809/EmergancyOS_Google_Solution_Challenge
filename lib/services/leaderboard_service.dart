@@ -145,18 +145,6 @@ class LeaderboardService {
     return 'Member';
   }
 
-  static Future<void> _forEachChunk<T>(
-    List<T> items,
-    int chunkSize,
-    Future<void> Function(T item) action,
-  ) async {
-    if (items.isEmpty) return;
-    for (var i = 0; i < items.length; i += chunkSize) {
-      final end = (i + chunkSize > items.length) ? items.length : i + chunkSize;
-      await Future.wait(List.generate(end - i, (j) => action(items[i + j])));
-    }
-  }
-
   /// Names stored on incidents when volunteers accept (`responderNames.{uid}`).
   /// Readable for all users who can read incidents — avoids blocked `users/{uid}` reads.
   static Map<String, String> _collectResponderNameHints(

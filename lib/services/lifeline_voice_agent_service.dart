@@ -1,265 +1,237 @@
 import 'dart:async';
+import 'dart:convert';
+
 import 'package:cloud_functions/cloud_functions.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
-import 'package:emergency_os/features/ai_assist/domain/lifeline_training_levels.dart';
+
+import 'package:emergency_os/features/ai_assist/data/lifeline_curriculum_digest.dart';
 import 'package:emergency_os/core/utils/speech_web.dart'
     if (dart.library.io) 'package:emergency_os/core/utils/speech_io.dart';
 
-enum LifelineVoiceState {
-  idle,
-  listening,
-  processing,
-  speaking,
-}
+/// Push-to-talk lifecycle for the Lifeline voice assistant.
+///
+/// UX contract:
+/// - Long-press the mic: STT starts (listening).
+/// - Release the press: STT stops, transcript is sent to Gemini, reply is
+///   spoken back (thinking -> speaking).
+/// - Short tap while speaking: cancels the TTS reply.
+/// - Short tap while listening: drops the capture without sending.
+/// - Screen dispose (`detachOverlay`): cancels STT and TTS.
+enum LifelineVoiceState { idle, listening, thinking, speaking }
 
 typedef LifelineVoiceCallback = void Function(LifelineVoiceState state);
+/// Fired once per reply, right before TTS: [spoken] is what will be read aloud;
+/// [openLibraryLevelId] is a curriculum id when the model links a library topic (may be null).
+typedef LifelineVoiceReplyCallback = void Function(
+  String spoken,
+  int? openLibraryLevelId,
+);
+typedef LifelineMicErrorCallback = void Function(String code);
 
 class LifelineVoiceAgentService {
   LifelineVoiceAgentService._();
-  static final LifelineVoiceAgentService instance = LifelineVoiceAgentService._();
+  static final LifelineVoiceAgentService instance =
+      LifelineVoiceAgentService._();
+
+  /// STT always listens with Indian English — Chrome's `en-IN` recognizer
+  /// reliably handles Hinglish mixing and an Indian accent. Gemini then
+  /// replies in whichever language the user actually spoke.
+  static const String _sttLocale = 'en-IN';
+
+  /// Matches any Devanagari codepoint. Used to switch TTS to `hi-IN` when
+  /// Gemini replies in Hindi.
+  static final RegExp _devanagari = RegExp(r'[\u0900-\u097F]');
 
   LifelineVoiceState _state = LifelineVoiceState.idle;
   LifelineVoiceCallback? _onStateChanged;
-  String? _currentLanguageCode;
+  LifelineVoiceReplyCallback? _onVoiceReply;
+  LifelineMicErrorCallback? _onMicError;
+
   final List<Map<String, String>> _history = [];
+
   bool _isListening = false;
+  bool _aborted = false;
   String _lastRecognizedText = '';
-  void Function(String keyword)? _onOfflineFallback;
 
   LifelineVoiceState get state => _state;
 
-  void setOnStateChanged(LifelineVoiceCallback callback) {
-    _onStateChanged = callback;
+  void setOnStateChanged(LifelineVoiceCallback? cb) {
+    _onStateChanged = cb;
   }
 
-  void setOnOfflineFallback(void Function(String keyword) callback) {
-    _onOfflineFallback = callback;
+  void setOnVoiceReply(LifelineVoiceReplyCallback? cb) {
+    _onVoiceReply = cb;
   }
 
-  void _setState(LifelineVoiceState newState) {
-    if (_state == newState) return;
-    _state = newState;
-    _onStateChanged?.call(newState);
+  void setOnMicError(LifelineMicErrorCallback? cb) {
+    _onMicError = cb;
   }
 
-  void setLanguage(String languageCode) {
-    _currentLanguageCode = languageCode;
+  void _setState(LifelineVoiceState next) {
+    if (_state == next) return;
+    _state = next;
+    _onStateChanged?.call(next);
   }
 
-  Future<void> startListening() async {
+  /// Long-press started on the mic bubble.
+  void beginHold() {
     if (_isListening) return;
+    // Any prior TTS must be silenced so the user can start talking immediately.
+    cancelSpeechText();
+    _aborted = false;
+    _lastRecognizedText = '';
     _isListening = true;
     _setState(LifelineVoiceState.listening);
 
-    _lastRecognizedText = '';
-
-    startListeningInternal(
-      _currentLanguageCode ?? 'en',
+    startListening(
+      _sttLocale,
       (text) {
         _lastRecognizedText = text;
-        debugPrint('[LifelineVoice] Recognized: $text');
       },
-      () {
-        _isListening = false;
-        if (_lastRecognizedText.trim().isNotEmpty) {
-          _processText(_lastRecognizedText);
-        } else {
-          _setState(LifelineVoiceState.idle);
-        }
-      },
+      _handleListenEnd,
       (error) {
-        debugPrint('[LifelineVoice] Error: $error');
+        debugPrint('[LifelineVoice] STT error: $error');
         _isListening = false;
+        _aborted = true;
+        _onMicError?.call(error);
         _setState(LifelineVoiceState.idle);
       },
-      () {
-        debugPrint('[LifelineVoice] Sound detected');
-      },
+      () {/* sound detected — no UI change needed */},
     );
   }
 
-  void stopListening() {
+  /// Long-press released on the mic bubble.
+  void endHold() {
     if (!_isListening) return;
-    stopListeningInternal();
-    _isListening = false;
+    stopListening();
+    // The STT engine will invoke [_handleListenEnd] shortly; that's where
+    // the transcript is actually dispatched to Gemini.
   }
 
-  Future<void> _processText(String text) async {
-    _setState(LifelineVoiceState.processing);
+  /// Short tap while the agent is listening — discard the capture.
+  void abortListening() {
+    if (!_isListening && _state != LifelineVoiceState.listening) return;
+    _aborted = true;
+    _isListening = false;
+    stopListening();
+    _setState(LifelineVoiceState.idle);
+  }
 
+  /// Short tap while the agent is speaking — stop the reply.
+  void cancelSpeaking() {
+    if (_state != LifelineVoiceState.speaking) return;
+    cancelSpeechText();
+    _setState(LifelineVoiceState.idle);
+  }
+
+  void _handleListenEnd() {
+    _isListening = false;
+    if (_aborted) {
+      _aborted = false;
+      return;
+    }
+    final text = _lastRecognizedText.trim();
+    if (text.isEmpty) {
+      _setState(LifelineVoiceState.idle);
+      return;
+    }
+    unawaited(_processTranscript(text));
+  }
+
+  Future<void> _processTranscript(String text) async {
+    _setState(LifelineVoiceState.thinking);
     try {
-      final reply = await _sendToGemini(text);
-      if (reply != null) {
-        _setState(LifelineVoiceState.speaking);
-        await _speak(reply);
+      final (spoken, levelId) = await _askGemini(text);
+      if (spoken == null || spoken.isEmpty) {
+        _setState(LifelineVoiceState.idle);
+        return;
       }
+      _onVoiceReply?.call(spoken, levelId);
+      _setState(LifelineVoiceState.speaking);
+      speakText(
+        spoken,
+        lang: _ttsLocaleFor(spoken),
+        onDone: () {
+          if (_state == LifelineVoiceState.speaking) {
+            _setState(LifelineVoiceState.idle);
+          }
+        },
+      );
     } catch (e) {
       debugPrint('[LifelineVoice] Gemini error: $e');
-      _handleOfflineFallback(text);
-    }
-
-    if (_state == LifelineVoiceState.speaking) {
       _setState(LifelineVoiceState.idle);
     }
   }
 
-  Future<String?> _sendToGemini(String text) async {
-    try {
-      final locale = _currentLanguageCode ?? 'en';
-      final bcp = _bcp47ForLocale(locale);
+  Future<(String?, int?)> _askGemini(String text) async {
+    final callable = FirebaseFunctions.instance.httpsCallable('lifelineChat');
+    final result = await callable.call(<String, dynamic>{
+      'message': text,
+      'history': _history,
+      'scenario': 'Lifeline voice assistant',
+      'trainingMode': true,
+      'voiceAssistantMode': true,
+      // Intentionally empty: server prompt then falls back to
+      // "match the language of the user's message" (see functions/index.js).
+      'replyLocale': '',
+      'contextDigest': LifelineCurriculumDigest.build(),
+      'analyticsMode': false,
+    });
 
-      final callable = FirebaseFunctions.instance.httpsCallable('lifelineChat');
-      final result = await callable.call(<String, dynamic>{
-        'message': text,
-        'replyLocaleBcp47': bcp,
-        'history': _history,
-        'scenario': 'Lifeline voice assistant',
-      });
+    final raw = result.data;
+    final Map<String, dynamic> data =
+        raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
 
-      final reply = result.data['reply'] as String?;
-      if (reply != null && reply.isNotEmpty) {
-        _history.add({'role': 'user', 'text': text});
-        _history.add({'role': 'model', 'text': reply});
-        while (_history.length > 12) {
-          _history.removeAt(0);
+    var reply = (data['text'] as String?)?.trim() ?? '';
+    int? openId;
+    final oid = data['openLibraryLevelId'];
+    if (oid is int) {
+      openId = oid;
+    } else if (oid is num) {
+      openId = oid.round();
+    }
+
+    // Older deployments may return the raw JSON string in `text`.
+    if (reply.startsWith('{') && reply.contains('"spoken"')) {
+      try {
+        final m = jsonDecode(reply) as Map<String, dynamic>?;
+        if (m != null && m['spoken'] is String) {
+          reply = (m['spoken'] as String).trim();
+          final o = m['openLibraryLevelId'];
+          if (o is int) {
+            openId = o;
+          } else if (o is num) {
+            openId = o.round();
+          }
         }
-        return reply;
-      }
-    } catch (e) {
-      rethrow;
-    }
-    return null;
-  }
-
-  void _handleOfflineFallback(String text) {
-    final normalizedText = text.toLowerCase().trim();
-    final matchedLevel = _matchKeyword(normalizedText);
-    if (matchedLevel != null) {
-      debugPrint('[LifelineVoice] Offline fallback: matched "${matchedLevel.title}"');
-      _onOfflineFallback?.call(matchedLevel.title);
-      _speakFallbackMessage(matchedLevel.title);
-    } else {
-      debugPrint('[LifelineVoice] No keyword match found for: $text');
-      _speakText(
-        'Sorry, I could not understand. You can browse the Lifeline library to learn about first aid topics.',
-      );
-    }
-  }
-
-  LifelineTrainingLevel? _matchKeyword(String text) {
-    final keywordMap = <String, LifelineTrainingLevel>{};
-
-    for (final level in kLifelineTrainingLevels) {
-      final keywords = <String>[];
-      keywords.add(level.title.toLowerCase());
-
-      final titleWords = level.title.toLowerCase().split(RegExp(r'\s+'));
-      for (final word in titleWords) {
-        if (word.length > 3) {
-          keywords.add(word);
-        }
-      }
-
-      if (level.subtitle.isNotEmpty) {
-        keywords.add(level.subtitle.toLowerCase());
-      }
-
-      for (final keyword in keywords) {
-        keywordMap[keyword] = level;
-      }
+      } catch (_) {}
     }
 
-    for (final entry in keywordMap.entries) {
-      if (text.contains(entry.key)) {
-        return entry.value;
-      }
+    if (reply.isEmpty) return (null, null);
+
+    _history.add({'role': 'user', 'text': text});
+    _history.add({'role': 'model', 'text': reply});
+    while (_history.length > 12) {
+      _history.removeAt(0);
     }
 
-    return null;
+    return (reply, openId);
   }
 
-  void _speakFallbackMessage(String matchedTitle) {
-    final message =
-        'Opening $matchedTitle. You can learn about this topic in the Lifeline library.';
-    _speakText(message);
-  }
+  String _ttsLocaleFor(String text) =>
+      _devanagari.hasMatch(text) ? 'hi-IN' : 'en-IN';
 
-  Future<void> _speak(String text) async {
-    final lang = _bcp47ForLocale(_currentLanguageCode ?? 'en');
-    speakText(
-      text,
-      lang: lang,
-      onDone: () {
-        if (_state == LifelineVoiceState.speaking) {
-          _setState(LifelineVoiceState.idle);
-        }
-      },
-    );
-  }
-
-  void _speakText(String text) {
-    final lang = _bcp47ForLocale(_currentLanguageCode ?? 'en');
-    speakText(
-      text,
-      lang: lang,
-      onDone: () {
-        if (_state == LifelineVoiceState.speaking) {
-          _setState(LifelineVoiceState.idle);
-        }
-      },
-    );
-  }
-
-  String _bcp47ForLocale(String languageCode) {
-    switch (languageCode) {
-      case 'hi':
-        return 'hi-IN';
-      case 'en':
-      default:
-        return 'en-IN';
-    }
-  }
-
-  void cancel() {
+  /// Called when the Lifeline screen is disposed. Cancels everything and
+  /// drops the callback set.
+  void detachOverlay() {
+    _aborted = true;
+    _isListening = false;
     stopListening();
     cancelSpeechText();
     _history.clear();
-    _setState(LifelineVoiceState.idle);
-  }
-
-  void resetToListening() {
-    cancel();
-    Future.delayed(const Duration(milliseconds: 100), () {
-      startListening();
-    });
-  }
-
-  void dispose() {
-    cancel();
+    _state = LifelineVoiceState.idle;
     _onStateChanged = null;
-    _onOfflineFallback = null;
-  }
-}
-
-void startListeningInternal(
-  String languageCode,
-  void Function(String) onResult,
-  void Function() onEnd,
-  void Function(String) onError,
-  void Function() onSoundDetected,
-) {
-  if (kIsWeb) {
-    startListening(languageCode, onResult, onEnd, onError, onSoundDetected);
-  } else {
-    startListening(languageCode, onResult, onEnd, onError, onSoundDetected);
-  }
-}
-
-void stopListeningInternal() {
-  if (kIsWeb) {
-    stopListening();
-  } else {
-    stopListening();
+    _onVoiceReply = null;
+    _onMicError = null;
   }
 }

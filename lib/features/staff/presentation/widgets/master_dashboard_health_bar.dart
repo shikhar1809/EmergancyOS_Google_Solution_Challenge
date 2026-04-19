@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../../services/ops_system_health_service.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 enum _MasterHealthTier {
   loading,
@@ -72,15 +73,18 @@ class _MasterDashboardHealthBarState extends State<MasterDashboardHealthBar> {
     return _MasterHealthTier.healthy;
   }
 
-  ({Color bg, Color fg, IconData icon, String title, String subtitle}) _style(_MasterHealthTier t) {
+  ({Color bg, Color fg, IconData icon, String title, String subtitle}) _style(
+    BuildContext context,
+    _MasterHealthTier t,
+  ) {
     switch (t) {
       case _MasterHealthTier.loading:
         return (
           bg: const Color(0xFF37474F),
           fg: Colors.white70,
           icon: Icons.hourglass_empty_rounded,
-          title: 'Checking system health…',
-          subtitle: 'GCP · LiveKit · SMS',
+          title: context.opsTr('Checking system health…'),
+          subtitle: context.opsTr('GCP · LiveKit · SMS'),
         );
       case _MasterHealthTier.healthy:
         final r = _report;
@@ -89,18 +93,20 @@ class _MasterDashboardHealthBarState extends State<MasterDashboardHealthBar> {
           bg: const Color(0xFF1B5E20),
           fg: const Color(0xFFE8F5E9),
           icon: Icons.health_and_safety_rounded,
-          title: 'All systems operational',
+          title: context.opsTr('All systems operational'),
           subtitle: smsNote
-              ? 'Firestore and LiveKit OK · SMS relay optional (not configured)'
-              : 'Firestore, LiveKit, and SMS checks passed',
+              ? context.opsTr(
+                  'Firestore and LiveKit OK · SMS relay optional (not configured)',
+                )
+              : context.opsTr('Firestore, LiveKit, and SMS checks passed'),
         );
       case _MasterHealthTier.degraded:
         return (
           bg: const Color(0xFFE65100),
           fg: const Color(0xFFFFF3E0),
           icon: Icons.warning_amber_rounded,
-          title: 'Degraded — one or more integrations need attention',
-          subtitle: _degradedSubtitle(_report!),
+          title: context.opsTr('Degraded — one or more integrations need attention'),
+          subtitle: _degradedSubtitle(context, _report!),
         );
       case _MasterHealthTier.critical:
         return (
@@ -108,19 +114,21 @@ class _MasterDashboardHealthBarState extends State<MasterDashboardHealthBar> {
           fg: const Color(0xFFFFEBEE),
           icon: Icons.error_outline_rounded,
           title: _error != null
-              ? 'Critical — cannot reach backend health service'
-              : 'Critical — Firestore / GCP check failed',
+              ? context.opsTr('Critical — cannot reach backend health service')
+              : context.opsTr('Critical — Firestore / GCP check failed'),
           subtitle:
-              _error != null ? '$_error' : (_report?.gcp.detail ?? 'Backend may be unavailable'),
+              _error != null ? '$_error' : (_report?.gcp.detail ?? context.opsTr('Backend may be unavailable')),
         );
     }
   }
 
-  static String _degradedSubtitle(OpsSystemHealthReport r) {
+  static String _degradedSubtitle(BuildContext context, OpsSystemHealthReport r) {
     final parts = <String>[];
     if (!r.livekit.ok) parts.add('LiveKit');
-    if (parts.isEmpty) return 'Review Systems tab for details';
-    return 'Issue: ${parts.join(' · ')} — tap for details';
+    if (parts.isEmpty) return context.opsTr('Review Systems tab for details');
+    return context
+        .opsTr('Issue: {parts} — tap for details')
+        .replaceAll('{parts}', parts.join(' · '));
   }
 
   void _showDetails() {
@@ -130,7 +138,7 @@ class _MasterDashboardHealthBarState extends State<MasterDashboardHealthBar> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1E293B),
-        title: const Text('Integration health', style: TextStyle(color: Colors.white)),
+        title: Text(context.opsTr('Integration health'), style: const TextStyle(color: Colors.white)),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -155,13 +163,13 @@ class _MasterDashboardHealthBarState extends State<MasterDashboardHealthBar> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(context.opsTr('Close'))),
           FilledButton(
             onPressed: () {
               Navigator.pop(ctx);
               unawaited(_load());
             },
-            child: const Text('Refresh'),
+            child: Text(context.opsTr('Refresh')),
           ),
         ],
       ),
@@ -212,7 +220,7 @@ class _MasterDashboardHealthBarState extends State<MasterDashboardHealthBar> {
   @override
   Widget build(BuildContext context) {
     final tier = _tier();
-    final st = _style(tier);
+    final st = _style(context, tier);
 
     return Material(
       color: st.bg,

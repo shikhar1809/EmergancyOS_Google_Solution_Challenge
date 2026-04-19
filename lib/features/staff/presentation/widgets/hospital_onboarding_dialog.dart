@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../services/hospital_onboarding_service.dart';
 import '../../domain/hospital_staff_credentials.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 class HospitalOnboardingDialog extends StatefulWidget {
   const HospitalOnboardingDialog({
@@ -228,9 +229,7 @@ class _HospitalOnboardingDialogState extends State<HospitalOnboardingDialog> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Text(
-                        'Staff Credentials',
-                        style: TextStyle(
+                      Text(context.opsTr('Staff Credentials'), style: TextStyle(
                           color: Colors.cyanAccent,
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
@@ -278,7 +277,7 @@ class _HospitalOnboardingDialogState extends State<HospitalOnboardingDialog> {
                       child: OutlinedButton.icon(
                         onPressed: _loading ? null : _regenerate,
                         icon: const Icon(Icons.refresh, size: 16),
-                        label: const Text('Reset credentials'),
+                        label: Text(context.opsTr('Reset credentials')),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.white70,
                           side: const BorderSide(color: Colors.white24),
@@ -295,15 +294,13 @@ class _HospitalOnboardingDialogState extends State<HospitalOnboardingDialog> {
                           foregroundColor: Colors.black,
                           padding: const EdgeInsets.symmetric(vertical: 10),
                         ),
-                        child: const Text('Done'),
+                        child: Text(context.opsTr('Done')),
                       ),
                     ),
                   ],
                 ),
               ] else ...[
-                const Text(
-                  'This will generate unique staff credentials for this hospital. Resetting credentials cancels out old ones.',
-                  style: TextStyle(color: Colors.white54, fontSize: 12),
+                Text(context.opsTr('This will generate unique staff credentials for this hospital. Resetting credentials cancels out old ones.'), style: TextStyle(color: Colors.white54, fontSize: 12),
                 ),
                 const SizedBox(height: 16),
                 ElevatedButton.icon(

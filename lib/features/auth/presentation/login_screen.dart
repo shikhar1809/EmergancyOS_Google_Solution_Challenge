@@ -29,23 +29,71 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _phoneController = TextEditingController();
   final _otpController = TextEditingController();
 
+  /// Maps raw Firebase / platform exceptions to short, user-friendly copy.
+  /// Never surface the stringified exception to the user — it exposes internal
+  /// error codes and looks unfinished in a demo / review.
+  String _friendlyAuthError(Object error) {
+    if (error is FirebaseAuthException) {
+      switch (error.code) {
+        case 'network-request-failed':
+          return 'No internet connection. Check your network and try again.';
+        case 'user-disabled':
+          return 'This account has been disabled. Contact support.';
+        case 'invalid-phone-number':
+          return 'That phone number doesn\u2019t look right. Please include country code.';
+        case 'invalid-verification-code':
+        case 'invalid-verification-id':
+          return 'The code you entered isn\u2019t valid. Try again.';
+        case 'too-many-requests':
+          return 'Too many attempts. Please wait a minute and try again.';
+        case 'credential-already-in-use':
+        case 'account-exists-with-different-credential':
+          return 'This account is already signed in somewhere else.';
+        case 'operation-not-allowed':
+          return 'Sign-in isn\u2019t enabled right now. Try again later.';
+        case 'popup-closed-by-user':
+        case 'cancelled':
+        case 'user-cancelled':
+          return 'Sign-in was cancelled.';
+        case 'sign_in_failed':
+          return 'Google sign-in failed. Please try again.';
+        default:
+          return error.message?.trim().isNotEmpty == true
+              ? error.message!
+              : 'Sign-in failed. Please try again.';
+      }
+    }
+    final msg = error.toString();
+    if (msg.toLowerCase().contains('network')) {
+      return 'Network issue. Check your connection and try again.';
+    }
+    return 'Something went wrong. Please try again.';
+  }
+
+  void _showAuthError(Object error) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(_friendlyAuthError(error)),
+        backgroundColor: AppColors.primaryDanger,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   Future<void> _handleGoogleSignIn() async {
     await StaffSessionService.clearRole();
     setState(() => _isLoading = true);
     try {
       final user = await ref.read(authRepositoryProvider).signInWithGoogle();
       if (user != null && context.mounted) {
-        ref.read(drillSessionDashboardDemoProvider.notifier).state = false;
-        ref.read(drillVictimPracticeShellProvider.notifier).state = false;
+        ref.read(drillSessionDashboardDemoProvider.notifier).set(false);
+        ref.read(drillVictimPracticeShellProvider.notifier).set(false);
         final dest = await IncidentService.recoverEmergencyRoutePath();
         if (context.mounted) context.go(dest ?? '/home');
       }
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString()), backgroundColor: AppColors.primaryDanger),
-        );
-      }
+      _showAuthError(e);
     } finally {
       if (context.mounted) setState(() => _isLoading = false);
     }
@@ -69,9 +117,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       onError: (err) {
         if (context.mounted) {
           setState(() => _isLoading = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(err), backgroundColor: AppColors.primaryDanger),
-          );
+          _showAuthError(err);
         }
       },
     );
@@ -86,17 +132,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     try {
       final user = await ref.read(authRepositoryProvider).verifyPhoneOTP(otp);
       if (user != null && context.mounted) {
-        ref.read(drillSessionDashboardDemoProvider.notifier).state = false;
-        ref.read(drillVictimPracticeShellProvider.notifier).state = false;
+        ref.read(drillSessionDashboardDemoProvider.notifier).set(false);
+        ref.read(drillVictimPracticeShellProvider.notifier).set(false);
         final dest = await IncidentService.recoverEmergencyRoutePath();
         if (context.mounted) context.go(dest ?? '/home');
       }
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString()), backgroundColor: AppColors.primaryDanger),
-        );
-      }
+      _showAuthError(e);
     } finally {
       if (context.mounted) setState(() => _isLoading = false);
     }
@@ -109,11 +151,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       await StaffSessionService.setRole(StaffConsoleRole.admin);
       if (context.mounted) context.go('/master-dashboard');
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: AppColors.primaryDanger),
-        );
-      }
+      _showAuthError(e);
     } finally {
       if (context.mounted) setState(() => _isLoading = false);
     }
@@ -126,11 +164,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       await StaffSessionService.setRole(StaffConsoleRole.emergencyServices);
       if (context.mounted) context.go('/emergency-services');
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: AppColors.primaryDanger),
-        );
-      }
+      _showAuthError(e);
     } finally {
       if (context.mounted) setState(() => _isLoading = false);
     }
@@ -156,16 +190,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       await DrillEntryService.arm('sos');
       await DrillSessionPersistence.activate(victimPractice: true);
       if (context.mounted) {
-        ref.read(drillSessionDashboardDemoProvider.notifier).state = true;
-        ref.read(drillVictimPracticeShellProvider.notifier).state = true;
+        ref.read(drillSessionDashboardDemoProvider.notifier).set(true);
+        ref.read(drillVictimPracticeShellProvider.notifier).set(true);
         context.go('/drill/dashboard');
       }
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: AppColors.primaryDanger),
-        );
-      }
+      _showAuthError(e);
     } finally {
       if (context.mounted) setState(() => _isLoading = false);
     }
@@ -182,16 +212,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       await DrillEntryService.arm('volunteer');
       await DrillSessionPersistence.activate(victimPractice: false);
       if (context.mounted) {
-        ref.read(drillSessionDashboardDemoProvider.notifier).state = true;
-        ref.read(drillVictimPracticeShellProvider.notifier).state = false;
+        ref.read(drillSessionDashboardDemoProvider.notifier).set(true);
+        ref.read(drillVictimPracticeShellProvider.notifier).set(false);
         context.go('/drill/dashboard');
       }
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: AppColors.primaryDanger),
-        );
-      }
+      _showAuthError(e);
     } finally {
       if (context.mounted) setState(() => _isLoading = false);
     }

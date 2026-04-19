@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 class AiMessage {
   final bool isUser;
@@ -123,9 +124,7 @@ class _EnhancedAiChatState extends State<EnhancedAiChat>
                 ),
               ),
               const SizedBox(width: 10),
-              const Text(
-                'Analytics AI Assistant',
-                style: TextStyle(
+              Text(context.opsTr('Analytics AI Assistant'), style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w900,
                   fontSize: 16,
@@ -351,9 +350,7 @@ class _EnhancedAiChatState extends State<EnhancedAiChat>
             ),
           ),
           const SizedBox(width: 8),
-          const Text(
-            'AI is analyzing live data...',
-            style: TextStyle(color: Colors.white54, fontSize: 11),
+          Text(context.opsTr('AI is analyzing live data...'), style: TextStyle(color: Colors.white54, fontSize: 11),
           ),
           const SizedBox(width: 8),
           AnimatedBuilder(
@@ -402,7 +399,7 @@ class _EnhancedAiChatState extends State<EnhancedAiChat>
               maxLines: 4,
               style: const TextStyle(color: Colors.white, fontSize: 13),
               decoration: InputDecoration(
-                hintText: 'Ask about the live feed...',
+                hintText: context.opsTr('Ask about the live feed...'),
                 hintStyle: const TextStyle(color: Colors.white30, fontSize: 12),
                 filled: true,
                 fillColor: Colors.white.withValues(alpha: 0.04),
@@ -442,7 +439,7 @@ class _EnhancedAiChatState extends State<EnhancedAiChat>
                       size: 20,
                       color: Colors.white,
                     ),
-              tooltip: 'Send',
+              tooltip: context.opsTr('Send'),
             ),
           ),
         ],

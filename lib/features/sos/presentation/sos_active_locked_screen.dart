@@ -1,3 +1,7 @@
+// SOS active-locked screen retains scaffolded tabs, helpers and voice-note
+// state reserved for the extended victim console. Suppressed until wired up.
+// ignore_for_file: unused_field, unused_element, unused_local_variable
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -44,6 +48,8 @@ import '../../../core/web_bridge/victim_recording.dart';
 import '../../../services/dispatch_chain_service.dart';
 import '../../../features/map/domain/emergency_zone_classification.dart';
 import '../../../core/l10n/app_localizations.dart';
+import '../../../core/providers/locale_provider.dart';
+import '../../../core/widgets/language_switcher_button.dart';
 
 class _DrillFeedEntry {
   final IconData icon;
@@ -84,6 +90,8 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
   int _acceptedCount = 0;
   String? _ambulanceEta;
   String? _medicalStatus;
+  /// EMS workflow from incident doc (`inbound` → driver confirms `on_scene` near scene → `returning` → complete at hospital).
+  String? _emsWorkflowPhase;
   double? _volunteerLat;
   double? _volunteerLng;
   String? _lastSpokenKey;
@@ -99,7 +107,7 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
 
   bool _emergencyTypeSelected = false;
   String? _selectedEmergencyType;
-  bool _audioUnlocked = false; // To track if we unblocked Web AudioContext
+  final bool _audioUnlocked = false; // To track if we unblocked Web AudioContext
   AreaIntelligence? _areaIntel;
 
   // channel updates
@@ -911,25 +919,31 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
       final triage = (data['triage'] as Map?)?.cast<String, dynamic>();
       final onSceneIds = List<String>.from(data['onSceneVolunteerIds'] ?? const []);
       final onSceneCount = onSceneIds.length;
+      final emsPhase = (data['emsWorkflowPhase'] as String?)?.trim() ?? '';
 
-      final key = '${ids.length}|${amb ?? ''}|${med ?? ''}|${vLat ?? ''}|${vLng ?? ''}|$onSceneCount';
+      final key = '${ids.length}|${amb ?? ''}|${med ?? ''}|${vLat ?? ''}|${vLng ?? ''}|$onSceneCount|$emsPhase';
       if (key != _lastSpokenKey) {
         _lastSpokenKey = key;
         final parts = <String>[];
+        if (!context.mounted) return;
+        final l10n = AppLocalizations.of(context);
         if (ids.length > _acceptedCount) {
-          parts.add('Volunteer accepted. Help is on the way.');
+          parts.add(l10n.get('voice_volunteer_accepted'));
         }
         final ambDispatchEnRoute =
             (_dispatchMapState?.assignment?.ambulanceDispatchStatus ?? '').trim() == 'ambulance_en_route';
         final hasLiveAmbVehicle = ambLLat != null && ambLLng != null;
         if (amb != null && amb.isNotEmpty && (hasLiveAmbVehicle || ambDispatchEnRoute)) {
-          parts.add('Ambulance dispatched. Estimated arrival: $amb.');
+          parts.add(l10n.get('voice_ambulance_dispatched_eta').replaceAll('{eta}', amb));
+        }
+        if (!widget.isDrillMode && emsPhase == 'on_scene') {
+          parts.add(l10n.get('voice_ambulance_on_scene_victim'));
         }
         if (med != null && med.isNotEmpty) parts.add(med);
         if (onSceneCount >= 2 && onSceneCount > _onSceneVolunteerCount) {
-          parts.add('$onSceneCount volunteers are on scene now.');
+          parts.add(l10n.get('voice_volunteers_on_scene_count').replaceAll('{n}', '$onSceneCount'));
         } else if (onSceneCount == 1 && _onSceneVolunteerCount == 0) {
-          parts.add('One volunteer is on scene.');
+          parts.add(l10n.get('voice_one_volunteer_on_scene'));
         }
         if (parts.isNotEmpty) {
           final msg = parts.join(' ');
@@ -947,6 +961,7 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
         _acceptedCount = ids.length;
         _ambulanceEta = amb;
         _medicalStatus = med;
+        _emsWorkflowPhase = emsPhase.isEmpty ? null : emsPhase;
         _volunteerLat = vLat;
         _volunteerLng = vLng;
         _ambulanceLivePos =
@@ -1055,16 +1070,25 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
   }
 
   String? _victimAmbulanceHeaderStat() {
+    final l10n = AppLocalizations.of(context);
     if (!_victimAmbulanceMinuteEtaVisible()) {
       final ambSt = (_dispatchMapState?.assignment?.ambulanceDispatchStatus ?? '').trim();
-      if (ambSt == 'pending_operator') return 'Coordinating crew';
-      if (_dispatchMapState?.isAccepted == true) return 'Coordinating';
-      return '—';
+      if (ambSt == 'pending_operator') {
+        return l10n.get('sos_active_header_stat_coordinating_crew');
+      }
+      if (_dispatchMapState?.isAccepted == true) {
+        return l10n.get('sos_active_header_stat_coordinating');
+      }
+      return l10n.get('sos_active_dash');
     }
     final doc = _ambulanceEta?.trim();
     if (doc != null && doc.isNotEmpty) return doc;
-    if (_routeEtaAmbMin != null) return '~${_routeEtaAmbMin} min';
-    return 'En route';
+    if (_routeEtaAmbMin != null) {
+      return l10n
+          .get('sos_active_header_stat_route_min')
+          .replaceAll('{n}', '${_routeEtaAmbMin}');
+    }
+    return l10n.get('sos_active_header_stat_en_route');
   }
 
   String? _victimAmbulanceLegendDocEta() {
@@ -1295,10 +1319,9 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
     // Add self (victim)
     final local = room.localParticipant;
     if (local != null) {
-      final id = local.identity ?? 'victim_$_uid';
-      final role = _BridgeParticipant.roleFromIdentity(id);
+      final id = local.identity;
       list.add(_BridgeParticipant(
-        identity: id,
+        identity: id.isEmpty ? 'victim_$_uid' : id,
         role: _BridgeRole.victim,
         displayName: 'You',
       ));
@@ -1307,7 +1330,8 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
     // Add remote participants
     for (final entry in room.remoteParticipants.entries) {
       final p = entry.value;
-      final id = p.identity ?? entry.key;
+      final pid = p.identity;
+      final id = pid.isEmpty ? entry.key : pid;
       final role = _BridgeParticipant.roleFromIdentity(id);
       list.add(_BridgeParticipant(
         identity: id,
@@ -2575,6 +2599,7 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
 
   /// Compact strip for victim mic / LiveKit bridge state (replaces hold-to-dictate control).
   Widget _buildLiveChannelMicStatusStrip() {
+    final l10n = AppLocalizations.of(context);
     final IconData icon;
     final Color accent;
     final String label;
@@ -2585,40 +2610,39 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
         case 'ptt_only':
           icon = Icons.phone_in_talk_rounded;
           accent = AppColors.primaryInfo;
-          label = 'Mic · Incident channel';
-          detail =
-              'Operations console routed voice via Firebase PTT. Hold Broadcast to reach responders.';
+          label = l10n.get('sos_active_mic_ptt_only');
+          detail = l10n.get('sos_active_mic_ptt_only_detail');
         case 'failed':
           icon = Icons.mic_off_rounded;
           accent = AppColors.primaryDanger;
-          label = 'Mic · Disrupted';
-          detail = 'Voice channel unavailable. Use RETRY above.';
+          label = l10n.get('sos_active_mic_failed');
+          detail = l10n.get('sos_active_mic_failed_detail');
         case 'reconnecting':
           icon = Icons.sync_rounded;
           accent = AppColors.primaryWarning;
-          label = 'Mic · Reconnecting';
-          detail = 'Restoring live audio…';
+          label = l10n.get('sos_active_mic_reconnecting');
+          detail = l10n.get('sos_active_mic_reconnecting_detail');
         case 'connecting':
           icon = Icons.mic_none_rounded;
           accent = AppColors.primaryWarning;
-          label = 'Mic · Connecting';
-          detail = 'Joining emergency voice channel…';
+          label = l10n.get('sos_active_mic_connecting');
+          detail = l10n.get('sos_active_mic_connecting_detail');
         default:
           icon = Icons.mic_none_rounded;
           accent = Colors.white38;
-          label = 'Mic · Standby';
-          detail = 'Waiting for voice channel…';
+          label = l10n.get('sos_active_mic_standby');
+          detail = l10n.get('sos_active_mic_standby_detail');
       }
     } else if (_livekitMicPausedForStt) {
       icon = Icons.mic_rounded;
       accent = AppColors.primaryWarning;
-      label = 'Mic · Interrupted';
-      detail = 'Brief pause while the app processes audio.';
+      label = l10n.get('sos_active_mic_interrupted');
+      detail = l10n.get('sos_active_mic_interrupted_detail');
     } else {
       icon = Icons.mic_rounded;
       accent = AppColors.primarySafe;
-      label = 'Mic · Active';
-      detail = 'Live channel is receiving your microphone.';
+      label = l10n.get('sos_active_mic_active');
+      detail = l10n.get('sos_active_mic_active_detail');
     }
 
     return Container(
@@ -2666,6 +2690,7 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
   }
 
   List<Widget> _incidentDrivenLiveUpdateRows() {
+    final l10n = AppLocalizations.of(context);
     final rows = <Widget>[];
     if (widget.isDrillMode) {
       rows.add(_liveUpdateRow(
@@ -2681,14 +2706,14 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
       rows.add(_liveUpdateRow(
         Icons.podcasts_rounded,
         AppColors.primaryDanger,
-        'SOS is live',
-        'Your location and medical flags are on the emergency network.',
+        l10n.get('sos_active_live_sos_is_live_title'),
+        l10n.get('sos_active_live_sos_is_live_detail'),
       ));
       rows.add(_liveUpdateRow(
         Icons.notifications_active_rounded,
         AppColors.primaryWarning,
-        'Volunteers notified',
-        'Nearby volunteers receive this incident in real time.',
+        l10n.get('sos_active_live_volunteers_notified_title'),
+        l10n.get('sos_active_live_volunteers_notified_detail'),
       ));
 
       final contactSub = _emergencyContactNotifySubtitle();
@@ -2696,7 +2721,7 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
         rows.add(_liveUpdateRow(
           Icons.contact_phone_rounded,
           AppColors.primaryInfo,
-          'Emergency contacts notified',
+          l10n.get('sos_active_live_contacts_notified_title'),
           contactSub,
         ));
       }
@@ -2707,8 +2732,8 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
       rows.add(_liveUpdateRow(
         Icons.local_shipping_rounded,
         AppColors.primarySafe,
-        'Professional dispatch active',
-        'Coordinated services are working this incident.',
+        l10n.get('sos_active_live_professional_dispatch_title'),
+        l10n.get('sos_active_live_professional_dispatch_detail'),
       ));
     }
 
@@ -2718,15 +2743,15 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
       rows.add(_liveUpdateRow(
         Icons.speaker_phone_rounded,
         AppColors.primaryInfo,
-        'Voice via Firebase PTT',
-        'Live WebRTC bridge is off for this fleet. Use Broadcast for voice and text updates.',
+        l10n.get('sos_active_live_ptt_title'),
+        l10n.get('sos_active_live_ptt_detail'),
       ));
     } else if (_livekitConnected) {
       rows.add(_liveUpdateRow(
         Icons.wifi_tethering_rounded,
         AppColors.primarySafe,
-        'Emergency voice bridge connected',
-        'Dispatch desk and responders can hear this channel.',
+        l10n.get('sos_active_live_bridge_connected_title'),
+        l10n.get('sos_active_live_bridge_connected_detail'),
       ));
     }
 
@@ -2735,7 +2760,7 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
       rows.add(_liveUpdateRow(
         Icons.local_hospital_rounded,
         Colors.greenAccent,
-        'Hospital accepted',
+        l10n.get('sos_active_live_hospital_accepted_title'),
         _dispatchMapState!.currentHospitalName,
       ));
     }
@@ -2744,8 +2769,10 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
       rows.add(_liveUpdateRow(
         Icons.local_shipping_rounded,
         AppColors.primaryInfo,
-        'Ambulance unit assigned',
-        'Unit $fleetCs',
+        l10n.get('sos_active_live_ambulance_unit_assigned_title'),
+        l10n
+            .get('sos_active_live_ambulance_unit_assigned_subtitle')
+            .replaceAll('{unit}', fleetCs),
       ));
     }
 
@@ -2753,12 +2780,18 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
     if (_victimAmbulanceMinuteEtaVisible()) {
       final etaLine = amb != null && amb.isNotEmpty
           ? amb
-          : (_routeEtaAmbMin != null ? '~${_routeEtaAmbMin} min (route)' : 'En route');
+          : (_routeEtaAmbMin != null
+              ? l10n
+                  .get('sos_active_live_ambulance_en_route_route_eta')
+                  .replaceAll('{n}', '${_routeEtaAmbMin}')
+              : l10n.get('sos_active_live_ambulance_en_route_default_eta'));
       rows.add(_liveUpdateRow(
         Icons.airport_shuttle_rounded,
         Colors.cyanAccent,
-        'Ambulance en route',
-        'EMS ETA · $etaLine',
+        l10n.get('sos_active_live_ambulance_en_route_title'),
+        l10n
+            .get('sos_active_live_ambulance_en_route_subtitle')
+            .replaceAll('{eta}', etaLine),
       ));
     } else {
       final a = _dispatchMapState?.assignment;
@@ -2769,10 +2802,10 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
         rows.add(_liveUpdateRow(
           Icons.hourglass_bottom_rounded,
           Colors.amberAccent,
-          'Ambulance coordination',
+          l10n.get('sos_active_live_ambulance_coordination_title'),
           ambSt == 'pending_operator'
-              ? 'Hospital accepted — alerting ambulance operators.'
-              : 'Arranging ambulance crew — minute ETA when unit is en route.',
+              ? l10n.get('sos_active_live_ambulance_coordination_pending')
+              : l10n.get('sos_active_live_ambulance_coordination_arranging'),
         ));
       }
     }
@@ -2782,7 +2815,7 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
       rows.add(_liveUpdateRow(
         Icons.medical_information_rounded,
         Colors.lightGreenAccent,
-        'Responder status',
+        l10n.get('sos_active_live_responder_status_title'),
         med,
       ));
     }
@@ -2791,10 +2824,14 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
       rows.add(_liveUpdateRow(
         Icons.volunteer_activism_rounded,
         AppColors.primarySafe,
-        _acceptedCount == 1 ? 'Volunteer accepted' : 'Volunteers accepted',
         _acceptedCount == 1
-            ? 'A responder is assigned and moving to help you.'
-            : '$_acceptedCount responders are assigned to this SOS.',
+            ? l10n.get('sos_active_live_volunteer_accepted_single_title')
+            : l10n.get('sos_active_live_volunteer_accepted_many_title'),
+        _acceptedCount == 1
+            ? l10n.get('sos_active_live_volunteer_accepted_single_detail')
+            : l10n
+                .get('sos_active_live_volunteer_accepted_many_detail')
+                .replaceAll('{n}', '$_acceptedCount'),
       ));
     }
 
@@ -2802,10 +2839,14 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
       rows.add(_liveUpdateRow(
         Icons.flag_rounded,
         Colors.orangeAccent,
-        _onSceneVolunteerCount == 1 ? 'Volunteer arrived on scene' : 'Volunteers on scene',
         _onSceneVolunteerCount == 1
-            ? 'Someone is with you or at your pin.'
-            : '$_onSceneVolunteerCount responders marked on scene.',
+            ? l10n.get('sos_active_live_volunteer_on_scene_single_title')
+            : l10n.get('sos_active_live_volunteer_on_scene_many_title'),
+        _onSceneVolunteerCount == 1
+            ? l10n.get('sos_active_live_volunteer_on_scene_single_detail')
+            : l10n
+                .get('sos_active_live_volunteer_on_scene_many_detail')
+                .replaceAll('{n}', '$_onSceneVolunteerCount'),
       ));
     }
 
@@ -2815,8 +2856,8 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
       rows.add(_liveUpdateRow(
         Icons.navigation_rounded,
         AppColors.primaryInfo,
-        'Live responder location',
-        'Assigned volunteer GPS is updating on the map.',
+        l10n.get('sos_active_live_responder_location_title'),
+        l10n.get('sos_active_live_responder_location_detail'),
       ));
     }
 
@@ -2827,13 +2868,18 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
       _bridgeParticipants.where((p) => p.role != _BridgeRole.lifeline).length;
 
   String _bridgeMicTitleLabel() {
+    final l10n = AppLocalizations.of(context);
     final n = _visibleBridgeParticipantCount();
-    final suffix = n == 0 ? '' : ' · $n on channel';
-    if (_livekitConnected) return 'Emergency voice channel$suffix';
-    if (_bridgeStatus == 'ptt_only') return 'Emergency channel · Firebase PTT$suffix';
-    if (_bridgeStatus == 'failed') return 'Emergency channel · tap retry$suffix';
-    if (_livekitStartAttempted) return 'Emergency channel · connecting$suffix';
-    return 'Emergency voice channel$suffix';
+    final suffix = n == 0
+        ? ''
+        : l10n.get('sos_active_bridge_channel_on_suffix').replaceAll('{n}', '$n');
+    if (_livekitConnected) return '${l10n.get('sos_active_bridge_channel_voice')}$suffix';
+    if (_bridgeStatus == 'ptt_only') return '${l10n.get('sos_active_bridge_channel_ptt')}$suffix';
+    if (_bridgeStatus == 'failed') return '${l10n.get('sos_active_bridge_channel_failed')}$suffix';
+    if (_livekitStartAttempted) {
+      return '${l10n.get('sos_active_bridge_channel_connecting')}$suffix';
+    }
+    return '${l10n.get('sos_active_bridge_channel_voice')}$suffix';
   }
 
   LatLng? get _dispatchHospitalTarget {
@@ -2922,6 +2968,7 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
     return Stack(
       children: [
         EosHybridMap(
+          ignoreRemoteLeafletTiles: false,
           cameraTargetBounds: IndiaOpsZones.lucknowCameraTargetBounds,
           initialCameraPosition: IndiaOpsZones.lucknowSafeCamera(_victimLatLng, preferZoom: 15.0),
           onCameraMove: (CameraPosition p) {
@@ -3137,9 +3184,9 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
               children: [
                 Icon(Icons.update_rounded, color: AppColors.primaryInfo, size: 16),
                 const SizedBox(width: 6),
-                const Text(
-                  'LIVE UPDATES',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 10.5, letterSpacing: 0.8),
+                Text(
+                  AppLocalizations.of(context).get('sos_active_live_updates_header'),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 10.5, letterSpacing: 0.8),
                 ),
                 const Spacer(),
                 Container(
@@ -3152,21 +3199,21 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
                 ),
                 const SizedBox(width: 4),
                 Text(
-                  'Live',
+                  AppLocalizations.of(context).get('sos_active_live_tag'),
                   style: TextStyle(color: AppColors.primarySafe.withValues(alpha: 0.9), fontSize: 9, fontWeight: FontWeight.w800),
                 ),
               ],
             ),
             const SizedBox(height: 2),
             Text(
-              'Dispatch, volunteers & device',
+              AppLocalizations.of(context).get('sos_active_live_updates_subtitle'),
               style: TextStyle(color: Colors.white.withValues(alpha: 0.38), fontSize: 9, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             ..._incidentDrivenLiveUpdateRows(),
             const Divider(height: 14, color: Colors.white12),
             Text(
-              'Activity log',
+              AppLocalizations.of(context).get('sos_active_activity_log'),
               style: TextStyle(color: Colors.white.withValues(alpha: 0.42), fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.5),
             ),
             const SizedBox(height: 6),
@@ -3285,6 +3332,11 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
       },
     );
 
+    ref.listen<Locale>(localeProvider, (prev, next) {
+      if (prev?.languageCode == next.languageCode) return;
+      VoiceCommsService.clearSpeakQueue();
+    });
+
     final mins = _elapsed.inMinutes;
     final secs = _elapsed.inSeconds % 60;
     final timeStr = '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
@@ -3318,19 +3370,38 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
                         letterSpacing: 0.2,
                       ),
                     ),
-                    Text(
-                      'UNLOCK PIN (practice): ${AppConstants.drillSosPracticePin}',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.cyanAccent.withValues(alpha: 0.92),
-                        letterSpacing: 0.5,
+                    // Drill PIN is intentionally *not* printed in the AppBar
+                    // to avoid a visible cheat-code in demo reels. Long-press
+                    // the drill banner to reveal.
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onLongPress: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            duration: const Duration(seconds: 4),
+                            backgroundColor: Colors.black87,
+                            content: Text(
+                              'Drill unlock PIN: ${AppConstants.drillSosPracticePin}',
+                              style: const TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        );
+                      },
+                      child: Text(
+                        'Long-press for practice unlock hint',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.cyanAccent.withValues(alpha: 0.75),
+                          letterSpacing: 0.3,
+                        ),
                       ),
                     ),
                   ],
                 ],
               ),
               actions: [
+                const LanguageSwitcherButton(),
                 IconButton(
                   tooltip: 'Stop speaking',
                   onPressed: VoiceCommsService.clearSpeakQueue,
@@ -3408,6 +3479,42 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
                               medicalStatus: _medicalStatus,
                             ),
                           ),
+                          if (!widget.isDrillMode && (_emsWorkflowPhase ?? '') == 'on_scene')
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                              child: Semantics(
+                                label: AppLocalizations.of(context)
+                                    .get('sos_active_ambulance_200m_semantic_label'),
+                                child: Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF004D40).withValues(alpha: 0.55),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: Colors.tealAccent.withValues(alpha: 0.5)),
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Icon(Icons.medical_services_rounded, color: Colors.tealAccent, size: 26),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Text(
+                                          AppLocalizations.of(context)
+                                              .get('sos_active_ambulance_200m_detail'),
+                                          style: TextStyle(
+                                            color: Colors.tealAccent.withValues(alpha: 0.95),
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 14,
+                                            height: 1.3,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
                           Padding(
                             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                             child: _DispatchChainStatusStrip(
@@ -3423,8 +3530,8 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
                               child: Text(
                                 widget.isDrillMode
                                     ? 'Practice mode: voice prompts run as normal; nothing is sent to real responders.'
-                                    : 'Your position is refreshed about every 45 seconds during SOS to save battery. '
-                                        'Keep the app open and plug in if you can.',
+                                    : AppLocalizations.of(context)
+                                        .get('sos_active_position_refresh_note'),
                                 style: TextStyle(
                                   color: Colors.white.withValues(alpha: 0.45),
                                   fontSize: 11.5,
@@ -3449,17 +3556,39 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
                                             initiallyExpanded: true,
                                             title: Row(
                                               children: [
-                                                Text(
-                                                  _bridgeStatus == 'failed'
-                                                      ? '🔴'
-                                                      : _livekitConnected
-                                                          ? '🟢'
-                                                          : _bridgeStatus == 'ptt_only'
-                                                              ? '🔵'
-                                                              : '🟡',
-                                                  style: const TextStyle(fontSize: 14),
+                                                // Pulse-dot status indicator —
+                                                // replaces the emoji blobs with a
+                                                // sized colour dot that reads as
+                                                // a real systems console.
+                                                Container(
+                                                  width: 10,
+                                                  height: 10,
+                                                  decoration: BoxDecoration(
+                                                    shape: BoxShape.circle,
+                                                    color: _livekitConnected
+                                                        ? AppColors.primarySafe
+                                                        : _bridgeStatus == 'failed'
+                                                            ? AppColors.primaryDanger
+                                                            : _bridgeStatus == 'ptt_only'
+                                                                ? AppColors.primaryInfo
+                                                                : AppColors.primaryWarning,
+                                                    boxShadow: [
+                                                      BoxShadow(
+                                                        color: (_livekitConnected
+                                                                ? AppColors.primarySafe
+                                                                : _bridgeStatus == 'failed'
+                                                                    ? AppColors.primaryDanger
+                                                                    : _bridgeStatus == 'ptt_only'
+                                                                        ? AppColors.primaryInfo
+                                                                        : AppColors.primaryWarning)
+                                                            .withValues(alpha: 0.55),
+                                                        blurRadius: 6,
+                                                        spreadRadius: 1,
+                                                      ),
+                                                    ],
+                                                  ),
                                                 ),
-                                                const SizedBox(width: 8),
+                                                const SizedBox(width: 10),
                                                 Icon(
                                                   _bridgeStatus == 'failed'
                                                       ? Icons.wifi_tethering_error_rounded
@@ -3522,20 +3651,93 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
                                                 ),
                                               if (_visibleBridgeParticipantCount() > 0)
                                                 Wrap(
-                                                  spacing: 10,
+                                                  spacing: 8,
                                                   runSpacing: 8,
                                                   children: _bridgeParticipants
                                                       .where((p) => p.role != _BridgeRole.lifeline)
                                                       .map(
-                                                        (p) => Text(
-                                                          '${_BridgeParticipant.emojiForRole(p.role)}${p.isSpeaking ? '🔊' : ''}',
-                                                          style: const TextStyle(fontSize: 22, height: 1),
+                                                        (p) => Container(
+                                                          padding: const EdgeInsets.symmetric(
+                                                              horizontal: 8, vertical: 4),
+                                                          decoration: BoxDecoration(
+                                                            color: p.isSpeaking
+                                                                ? AppColors.primarySafe
+                                                                    .withValues(alpha: 0.18)
+                                                                : Colors.white
+                                                                    .withValues(alpha: 0.06),
+                                                            borderRadius:
+                                                                BorderRadius.circular(20),
+                                                            border: Border.all(
+                                                              color: p.isSpeaking
+                                                                  ? AppColors.primarySafe
+                                                                      .withValues(alpha: 0.6)
+                                                                  : Colors.white
+                                                                      .withValues(alpha: 0.12),
+                                                              width: 1,
+                                                            ),
+                                                          ),
+                                                          child: Row(
+                                                            mainAxisSize: MainAxisSize.min,
+                                                            children: [
+                                                              Icon(
+                                                                _BridgeParticipant.iconForRole(p.role),
+                                                                size: 14,
+                                                                color: p.isSpeaking
+                                                                    ? AppColors.primarySafe
+                                                                    : Colors.white
+                                                                        .withValues(alpha: 0.72),
+                                                              ),
+                                                              const SizedBox(width: 6),
+                                                              Text(
+                                                                _BridgeParticipant.shortLabelForRole(p.role),
+                                                                style: TextStyle(
+                                                                  fontSize: 11,
+                                                                  fontWeight: FontWeight.w700,
+                                                                  color: p.isSpeaking
+                                                                      ? AppColors.primarySafe
+                                                                      : Colors.white
+                                                                          .withValues(alpha: 0.78),
+                                                                ),
+                                                              ),
+                                                              if (p.isSpeaking) ...[
+                                                                const SizedBox(width: 4),
+                                                                const Icon(
+                                                                  Icons.graphic_eq_rounded,
+                                                                  size: 12,
+                                                                  color:
+                                                                      AppColors.primarySafe,
+                                                                ),
+                                                              ],
+                                                            ],
+                                                          ),
                                                         ),
                                                       )
                                                       .toList(),
                                                 )
                                               else if (_livekitConnected)
-                                                const Text('⏳', style: TextStyle(fontSize: 22)),
+                                                Row(
+                                                  children: [
+                                                    SizedBox(
+                                                      width: 12,
+                                                      height: 12,
+                                                      child: CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                        color: Colors.white
+                                                            .withValues(alpha: 0.55),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Text(
+                                                      'Waiting for responders…',
+                                                      style: TextStyle(
+                                                        color: Colors.white
+                                                            .withValues(alpha: 0.6),
+                                                        fontSize: 11,
+                                                        fontWeight: FontWeight.w600,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
                                             ],
                                           ),
                                         ),
@@ -3549,7 +3751,8 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
                                           Padding(
                                             padding: const EdgeInsets.only(top: 6),
                                             child: Text(
-                                              'Answer consciousness checks with YES or NO; other prompts use on-screen options.',
+                                              AppLocalizations.of(context)
+                                                  .get('sos_active_consciousness_note'),
                                               style: TextStyle(color: Colors.white.withValues(alpha: 0.38), fontSize: 9, height: 1.25),
                                             ),
                                           ),
@@ -3936,6 +4139,34 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
                   ),
                 ),
               ),
+            ValueListenableBuilder<String?>(
+              valueListenable: VoiceCommsService.ttsStatusNotifier,
+              builder: (context, msg, _) {
+                if (msg == null || msg.isEmpty) return const SizedBox.shrink();
+                return Positioned(
+                  top: MediaQuery.paddingOf(context).top + 6,
+                  left: 12,
+                  right: 12,
+                  child: Material(
+                    elevation: 8,
+                    borderRadius: BorderRadius.circular(12),
+                    color: Colors.deepOrange.shade900.withValues(alpha: 0.94),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      child: Text(
+                        msg,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -3960,6 +4191,8 @@ class _StatusHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final dash = l10n.get('sos_active_dash');
     return Container(
       decoration: BoxDecoration(
         gradient: AppColors.surfaceGradient,
@@ -3979,12 +4212,12 @@ class _StatusHeader extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'ACTIVE SOS',
+                      l10n.get('sos_active_title_big'),
                       style: const TextStyle(color: AppColors.primaryDanger, fontWeight: FontWeight.w900, fontFamily: 'monospace', fontSize: 24, letterSpacing: 1.5),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Help is coming. Stay calm.',
+                      l10n.get('sos_active_help_coming'),
                       style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 16, fontWeight: FontWeight.w700),
                     ),
                   ],
@@ -3998,7 +4231,11 @@ class _StatusHeader extends StatelessWidget {
                   border: Border.all(color: (acceptedCount > 0 ? AppColors.primarySafe : AppColors.primaryDanger).withValues(alpha: 0.7)),
                 ),
                 child: Text(
-                  acceptedCount > 0 ? '$acceptedCount EN ROUTE' : 'WAITING',
+                  acceptedCount > 0
+                      ? l10n
+                          .get('sos_active_badge_en_route_count')
+                          .replaceAll('{n}', '$acceptedCount')
+                      : l10n.get('sos_active_badge_waiting'),
                   style: TextStyle(
                     color: acceptedCount > 0 ? AppColors.primarySafe : AppColors.primaryDanger,
                     fontWeight: FontWeight.w900,
@@ -4014,9 +4251,22 @@ class _StatusHeader extends StatelessWidget {
             spacing: 10,
             runSpacing: 10,
             children: [
-              _MiniStat(label: 'Ambulance', value: ambulanceEta ?? '—'),
-              _MiniStat(label: 'On scene', value: onSceneVolunteerCount <= 0 ? '0' : '$onSceneVolunteerCount volunteers'),
-              _MiniStat(label: 'Status', value: medicalStatus ?? '—'),
+              _MiniStat(
+                label: l10n.get('sos_active_mini_ambulance'),
+                value: ambulanceEta ?? dash,
+              ),
+              _MiniStat(
+                label: l10n.get('sos_active_mini_on_scene'),
+                value: onSceneVolunteerCount <= 0
+                    ? '0'
+                    : l10n
+                        .get('sos_active_volunteers_count_short')
+                        .replaceAll('{n}', '$onSceneVolunteerCount'),
+              ),
+              _MiniStat(
+                label: l10n.get('sos_active_mini_status'),
+                value: medicalStatus ?? dash,
+              ),
             ],
           ),
         ],
@@ -4112,6 +4362,7 @@ class _DispatchChainStatusStripState extends State<_DispatchChainStatusStrip> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return StreamBuilder<DispatchChainState>(
       stream: DispatchChainService.watchForIncident(widget.incidentId),
       builder: (context, snap) {
@@ -4124,9 +4375,9 @@ class _DispatchChainStatusStripState extends State<_DispatchChainStatusStrip> {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: Colors.white10),
             ),
-            child: const Text(
-              'We are contacting nearby hospitals based on your location and emergency type.',
-              style: TextStyle(color: Colors.white70, fontSize: 11.5, height: 1.35),
+            child: Text(
+              l10n.get('sos_active_dispatch_contact_hospitals_default'),
+              style: const TextStyle(color: Colors.white70, fontSize: 11.5, height: 1.35),
             ),
           );
         }
@@ -4140,9 +4391,9 @@ class _DispatchChainStatusStripState extends State<_DispatchChainStatusStrip> {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: Colors.white10),
             ),
-            child: const Text(
-              'We are contacting nearby hospitals based on your location and emergency type.',
-              style: TextStyle(color: Colors.white70, fontSize: 11.5, height: 1.35),
+            child: Text(
+              l10n.get('sos_active_dispatch_contact_hospitals_default'),
+              style: const TextStyle(color: Colors.white70, fontSize: 11.5, height: 1.35),
             ),
           );
         }
@@ -4156,24 +4407,31 @@ class _DispatchChainStatusStripState extends State<_DispatchChainStatusStrip> {
         Color? tierColor;
 
         if (ambSt == 'pending_operator') {
-          title = 'Ambulance crew notified';
+          title = l10n.get('sos_active_dispatch_ambulance_crew_notified_title');
           subtitle =
-              'A partner hospital accepted your case. Ambulance operators are being alerted.';
+              l10n.get('sos_active_dispatch_ambulance_crew_notified_subtitle');
         } else if (ambSt == 'ambulance_en_route') {
-          title = 'Ambulance confirmed';
+          title = l10n.get('sos_active_dispatch_ambulance_confirmed_title');
           final unit = (assignment.assignedFleetCallSign ?? '').trim();
           subtitle = unit.isNotEmpty
-              ? 'Unit $unit is en route to you. Stay where responders can reach you.'
-              : 'An ambulance is en route to you. Stay where responders can reach you.';
+              ? l10n
+                  .get('sos_active_dispatch_ambulance_confirmed_subtitle_unit')
+                  .replaceAll('{unit}', unit)
+              : l10n
+                  .get('sos_active_dispatch_ambulance_confirmed_subtitle_generic');
         } else if (ambSt == 'no_operator') {
-          title = 'Ambulance handoff delayed';
+          title = l10n.get('sos_active_dispatch_ambulance_handoff_delayed_title');
           subtitle =
-              'A hospital accepted, but no ambulance crew confirmed in time. Dispatch is escalating — if needed, call 112.';
+              l10n.get('sos_active_dispatch_ambulance_handoff_delayed_subtitle');
         } else {
           switch (status) {
             case 'pending_acceptance':
-              title = 'Trying: $hospName';
-              subtitle = '$tierLabel · Waiting for hospital response.';
+              title = l10n
+                  .get('sos_active_dispatch_pending_title_trying')
+                  .replaceAll('{hospital}', hospName);
+              subtitle = l10n
+                  .get('sos_active_dispatch_pending_subtitle_waiting')
+                  .replaceAll('{tier}', tierLabel);
               tierColor = state.currentTier == 1
                   ? Colors.redAccent
                   : state.currentTier == 2
@@ -4181,19 +4439,23 @@ class _DispatchChainStatusStripState extends State<_DispatchChainStatusStrip> {
                       : Colors.blueGrey;
               break;
             case 'accepted':
-              title = '$hospName accepted';
-              subtitle = 'Ambulance dispatch is being coordinated.';
+              title = l10n
+                  .get('sos_active_dispatch_accepted_title')
+                  .replaceAll('{hospital}', hospName);
+              subtitle = l10n.get('sos_active_dispatch_accepted_subtitle');
               tierColor = Colors.greenAccent;
               break;
             case 'exhausted':
-              title = 'All hospitals notified';
-              subtitle =
-                  'No hospital accepted in time. Dispatch is escalating to emergency services.';
+              title = l10n.get('sos_active_dispatch_exhausted_title');
+              subtitle = l10n.get('sos_active_dispatch_exhausted_subtitle');
               tierColor = AppColors.primaryDanger;
               break;
             default:
-              title = 'Hospital dispatch';
-              subtitle = '$hospName · $status';
+              title = l10n.get('sos_active_dispatch_generic_title');
+              subtitle = l10n
+                  .get('sos_active_dispatch_generic_subtitle')
+                  .replaceAll('{hospital}', hospName)
+                  .replaceAll('{status}', status);
               break;
           }
         }
@@ -4507,6 +4769,7 @@ class _MapTab extends StatelessWidget {
           ),
           clipBehavior: Clip.antiAlias,
           child: EosHybridMap(
+            ignoreRemoteLeafletTiles: false,
             cameraTargetBounds: IndiaOpsZones.lucknowCameraTargetBounds,
             initialCameraPosition: victimLatLng == null
                 ? IndiaOpsZones.lucknowCameraPosition(zoom: IndiaOpsZones.lucknow.defaultZoom)
@@ -4713,6 +4976,44 @@ class _BridgeParticipant {
         return '🎤';
       case _BridgeRole.unknown:
         return '👤';
+    }
+  }
+
+  static IconData iconForRole(_BridgeRole role) {
+    switch (role) {
+      case _BridgeRole.lifeline:
+        return Icons.smart_toy_rounded;
+      case _BridgeRole.emergencyDesk:
+        return Icons.local_hospital_rounded;
+      case _BridgeRole.emergencyContact:
+        return Icons.phone_rounded;
+      case _BridgeRole.volunteerElite:
+        return Icons.shield_rounded;
+      case _BridgeRole.acceptedVolunteer:
+        return Icons.volunteer_activism_rounded;
+      case _BridgeRole.victim:
+        return Icons.mic_rounded;
+      case _BridgeRole.unknown:
+        return Icons.person_rounded;
+    }
+  }
+
+  static String shortLabelForRole(_BridgeRole role) {
+    switch (role) {
+      case _BridgeRole.lifeline:
+        return 'Lifeline AI';
+      case _BridgeRole.emergencyDesk:
+        return 'EMS';
+      case _BridgeRole.emergencyContact:
+        return 'Contact';
+      case _BridgeRole.volunteerElite:
+        return 'Elite Vol.';
+      case _BridgeRole.acceptedVolunteer:
+        return 'Volunteer';
+      case _BridgeRole.victim:
+        return 'You';
+      case _BridgeRole.unknown:
+        return 'Peer';
     }
   }
 

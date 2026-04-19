@@ -8,6 +8,7 @@ import '../../../../core/maps/maps_leaflet_fallback_provider.dart';
 import '../../../../core/providers/ops_integration_routing_provider.dart';
 import '../../../../services/ops_integration_routing_service.dart';
 import '../../../../services/ops_system_health_service.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 /// Master-only panel: fleet voice/maps routing, integration health, Firestore ping.
 class MasterSystemsStatusSection extends ConsumerStatefulWidget {
@@ -88,10 +89,10 @@ class _MasterSystemsStatusSectionState extends ConsumerState<MasterSystemsStatus
           style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 13, height: 1.35),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(context.opsTr('Cancel'))),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Confirm'),
+            child: Text(context.opsTr('Confirm')),
           ),
         ],
       ),
@@ -115,10 +116,10 @@ class _MasterSystemsStatusSectionState extends ConsumerState<MasterSystemsStatus
           style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 13, height: 1.35),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(context.opsTr('Cancel'))),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Confirm'),
+            child: Text(context.opsTr('Confirm')),
           ),
         ],
       ),
@@ -145,7 +146,7 @@ class _MasterSystemsStatusSectionState extends ConsumerState<MasterSystemsStatus
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Voice routing updated.')),
+          SnackBar(content: Text(context.opsTr('Voice routing updated.'))),
         );
       }
     } catch (e) {
@@ -176,7 +177,7 @@ class _MasterSystemsStatusSectionState extends ConsumerState<MasterSystemsStatus
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Map tiles routing updated.')),
+          SnackBar(content: Text(context.opsTr('Map tiles routing updated.'))),
         );
       }
     } catch (e) {
@@ -205,9 +206,7 @@ class _MasterSystemsStatusSectionState extends ConsumerState<MasterSystemsStatus
             children: [
               Icon(Icons.monitor_heart_outlined, color: widget.accent, size: 22),
               const SizedBox(width: 10),
-              const Text(
-                'Systems status',
-                style: TextStyle(
+              Text(context.opsTr('Systems status'), style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w900,
                   fontSize: 15,
@@ -225,7 +224,7 @@ class _MasterSystemsStatusSectionState extends ConsumerState<MasterSystemsStatus
             _sectionLabel('Victim voice transport'),
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
-              title: const Text('LiveKit emergency bridge', style: TextStyle(color: Colors.white, fontSize: 13)),
+              title: Text(context.opsTr('LiveKit emergency bridge'), style: TextStyle(color: Colors.white, fontSize: 13)),
               subtitle: Text(
                 routing.useFirebasePttOnly
                     ? 'Off — Firebase PTT / incident channel only'
@@ -245,11 +244,11 @@ class _MasterSystemsStatusSectionState extends ConsumerState<MasterSystemsStatus
             _sectionLabel('Map tiles'),
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Google Maps', style: TextStyle(color: Colors.white, fontSize: 13)),
+              title: Text(context.opsTr('Google Maps'), style: TextStyle(color: Colors.white, fontSize: 13)),
               subtitle: Text(
                 routing.mapsTiles == OpsMapsTiles.leaflet
-                    ? 'Fleet forced to OSM / Leaflet-style tiles'
-                    : 'Fleet prefers Google (auto OSM fallback may still apply)',
+                    ? 'Volunteer / home maps use OSM. Staff ops consoles stay on Google unless this device auto-fallbacks.'
+                    : 'Volunteer / home maps prefer Google (auto OSM fallback may still apply).',
                 style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 11),
               ),
               value: routing.mapsTiles == OpsMapsTiles.google,
@@ -262,7 +261,7 @@ class _MasterSystemsStatusSectionState extends ConsumerState<MasterSystemsStatus
             if (autoLeaflet && routing.mapsTiles == OpsMapsTiles.google) ...[
               const SizedBox(height: 6),
               Text(
-                'This device still shows OSM because automatic Google fallback is active. Clear it to retry Google when the console routing is Google.',
+                'This device still uses OSM (Google load/auth failed). Clear to retry Google on staff consoles and volunteer maps.',
                 style: TextStyle(color: Colors.amberAccent.withValues(alpha: 0.85), fontSize: 10, height: 1.3),
               ),
               Align(
@@ -274,7 +273,7 @@ class _MasterSystemsStatusSectionState extends ConsumerState<MasterSystemsStatus
                           reason: 'master_cleared_auto_fallback',
                         );
                   },
-                  child: const Text('Clear auto-fallback on this device'),
+                  child: Text(context.opsTr('Clear auto-fallback on this device')),
                 ),
               ),
             ],
@@ -282,7 +281,7 @@ class _MasterSystemsStatusSectionState extends ConsumerState<MasterSystemsStatus
             _sectionLabel('SMS service'),
             ListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Relay status', style: TextStyle(color: Colors.white70, fontSize: 13)),
+              title: Text(context.opsTr('Relay status'), style: TextStyle(color: Colors.white70, fontSize: 13)),
               subtitle: Text(
                 _health == null && _healthError == null
                     ? 'Use Refresh health below'
@@ -340,7 +339,7 @@ class _MasterSystemsStatusSectionState extends ConsumerState<MasterSystemsStatus
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
                       : const Icon(Icons.refresh_rounded, size: 18),
-                  label: const Text('Refresh health'),
+                  label: Text(context.opsTr('Refresh health')),
                 ),
                 OutlinedButton.icon(
                   onPressed: () async {
@@ -348,7 +347,7 @@ class _MasterSystemsStatusSectionState extends ConsumerState<MasterSystemsStatus
                       await FirebaseFirestore.instance.collection('_health_check').limit(1).get();
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Firestore ping OK')),
+                          SnackBar(content: Text(context.opsTr('Firestore ping OK'))),
                         );
                       }
                     } catch (e) {
@@ -360,7 +359,7 @@ class _MasterSystemsStatusSectionState extends ConsumerState<MasterSystemsStatus
                     }
                   },
                   icon: const Icon(Icons.storage_rounded, size: 18, color: Colors.white70),
-                  label: const Text('Firestore ping', style: TextStyle(color: Colors.white70)),
+                  label: Text(context.opsTr('Firestore ping'), style: TextStyle(color: Colors.white70)),
                 ),
               ],
             ),

@@ -258,7 +258,7 @@ class CommandCenterActiveIncidentList extends StatelessWidget {
                                     ),
                                   if (e.emsWorkflowPhase != null && e.emsWorkflowPhase!.isNotEmpty)
                                     Text(
-                                      'EMS ${e.emsWorkflowPhase}',
+                                      'EMS ${emsWorkflowPhaseShortLabel(e.emsWorkflowPhase)}',
                                       style: const TextStyle(color: Colors.cyanAccent, fontSize: 9),
                                     ),
                                 ],

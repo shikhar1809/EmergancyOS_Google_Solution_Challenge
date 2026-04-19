@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../../core/l10n/app_localizations.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../services/sos_escalation_service.dart';
 import '../../../services/voice_comms_service.dart';
@@ -47,10 +48,6 @@ class _EmergencyDispatchOverlayState extends State<EmergencyDispatchOverlay> {
   // Voice note state
   bool _isRecording = false;
 
-  String? _ambulanceEta;
-  String? _medicalStatus;
-  double? _volunteerLat;
-  double? _volunteerLng;
   String? _lastSpokenKey;
 
   User? get _user => FirebaseAuth.instance.currentUser;
@@ -91,8 +88,16 @@ class _EmergencyDispatchOverlayState extends State<EmergencyDispatchOverlay> {
           _pttSeen.add(m.id);
           if (m.senderId == _uid) continue;
           if (m.type == PttMessageType.join) {
-            final who = m.senderName.trim().isEmpty ? 'A responder' : m.senderName.trim();
-            unawaited(VoiceCommsService.readAloud('$who joined voice communications.'));
+            if (!context.mounted) return;
+            final l10n = AppLocalizations.of(context);
+            final who = m.senderName.trim().isEmpty
+                ? l10n.get('voice_ptt_responder_default')
+                : m.senderName.trim();
+            unawaited(
+              VoiceCommsService.readAloud(
+                l10n.get('voice_ptt_joined_comms').replaceAll('{who}', who),
+              ),
+            );
           } else if (m.type == PttMessageType.voice &&
               (m.audioBase64 != null && m.audioBase64!.isNotEmpty)) {
             unawaited(playPttVoiceClipBase64(m.audioBase64, mimeType: m.audioMimeType));
@@ -119,11 +124,12 @@ class _EmergencyDispatchOverlayState extends State<EmergencyDispatchOverlay> {
             _logs.add('✅ VOLUNTEER #$_acceptedCount ACCEPTED — En route to you!');
           });
           final id = widget.incidentId;
-          if (id != null && id.isNotEmpty) {
+          if (id != null && id.isNotEmpty && context.mounted) {
+            final l10n = AppLocalizations.of(context);
             unawaited(
               VoiceCommsService.readAloudForIncident(
                 incidentId: id,
-                text: 'Volunteer accepted. Help is on the way.',
+                text: l10n.get('voice_volunteer_accepted'),
               ),
             );
           }
@@ -137,32 +143,26 @@ class _EmergencyDispatchOverlayState extends State<EmergencyDispatchOverlay> {
         final key = '${amb ?? ''}|${med ?? ''}|${vLat ?? ''}|${vLng ?? ''}';
         if (key != _lastSpokenKey) {
           _lastSpokenKey = key;
-          final parts = <String>[];
+          if (!context.mounted) return;
+          final l10n = AppLocalizations.of(context);
+          final out = <String>[];
           if (amb != null && amb.isNotEmpty) {
-            parts.add('Ambulance dispatched. Estimated arrival: $amb.');
+            out.add(l10n.get('voice_ambulance_dispatched_eta').replaceAll('{eta}', amb));
           }
-          if (med != null && med.isNotEmpty) parts.add(med);
-          if (parts.isNotEmpty) {
+          if (med != null && med.isNotEmpty) out.add(med);
+          if (out.isNotEmpty) {
             final id = widget.incidentId;
             if (id != null && id.isNotEmpty) {
               unawaited(
                 VoiceCommsService.readAloudForIncident(
                   incidentId: id,
-                  text: parts.join(' '),
+                  text: out.join(' '),
                 ),
               );
             }
           }
         }
 
-        if (context.mounted) {
-          setState(() {
-            _ambulanceEta = amb;
-            _medicalStatus = med;
-            _volunteerLat = vLat;
-            _volunteerLng = vLng;
-          });
-        }
       });
     }
   }

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import '../../../core/l10n/app_localizations.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/ptt_voice_playback.dart';
 import '../../../services/voice_comms_service.dart';
@@ -85,8 +86,16 @@ class _PttChannelScreenState extends ConsumerState<PttChannelScreen>
         _seenPttIds.add(m.id);
         if (m.senderId == _uid) continue;
         if (m.type == PttMessageType.join) {
-          final who = (m.senderName).trim().isEmpty ? 'A responder' : m.senderName.trim();
-          unawaited(VoiceCommsService.readAloud('$who joined voice communications.'));
+          if (!mounted) return;
+          final l10n = AppLocalizations.of(context);
+          final who = m.senderName.trim().isEmpty
+              ? l10n.get('voice_ptt_responder_default')
+              : m.senderName.trim();
+          unawaited(
+            VoiceCommsService.readAloud(
+              l10n.get('voice_ptt_joined_comms').replaceAll('{who}', who),
+            ),
+          );
         }
       }
     });

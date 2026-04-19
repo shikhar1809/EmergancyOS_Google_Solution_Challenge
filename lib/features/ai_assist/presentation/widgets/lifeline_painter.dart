@@ -88,7 +88,6 @@ class _LifelinePainter extends CustomPainter {
     const int segments = 100;
     for (int i = 0; i <= segments; i++) {
       double x = (i / segments) * width;
-      double y = centerY;
 
       // Base heartbeat logic
       // We want a "pulse" peak moving from left to right

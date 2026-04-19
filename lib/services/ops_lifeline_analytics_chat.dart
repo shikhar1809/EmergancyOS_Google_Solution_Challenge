@@ -62,7 +62,7 @@ abstract final class OpsLifelineAnalyticsChat {
     });
     final raw = res.data;
     final Map<String, dynamic> data = raw is Map
-        ? Map<String, dynamic>.from(raw as Map)
+        ? Map<String, dynamic>.from(raw)
         : <String, dynamic>{};
     final status = (data['status'] as String?)?.trim() ?? 'ok';
     var reply = (data['text'] as String?)?.trim() ?? 'No response.';

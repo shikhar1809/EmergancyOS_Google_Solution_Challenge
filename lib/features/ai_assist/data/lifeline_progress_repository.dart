@@ -90,11 +90,13 @@ class LifelineProgressRepository {
     });
   }
 
-  /// Clears [levelId] if it is the next level (levelsCleared + 1 == levelId). Awards XP.
-  Future<void> recordLevelPassed(int levelId, int xpReward) async {
+  /// Clears [stageIndex] if it is the next stage along [kLifelineTrainingLevels]
+  /// (`1` = first item … `length` = last). This is the list position, not the
+  /// curriculum [LifelineTrainingLevel.id] (which may have gaps).
+  Future<void> recordLevelPassed(int stageIndex, int xpReward) async {
     final uid = _uid;
     if (uid == null || uid.isEmpty) return;
-    if (levelId < 1 || levelId > kLifelineTrainingLevels.length) return;
+    if (stageIndex < 1 || stageIndex > kLifelineTrainingLevels.length) return;
 
     final ref = _db.collection('users').doc(uid);
     await _db.runTransaction((tx) async {
@@ -104,11 +106,11 @@ class LifelineProgressRepository {
       if (cur is int) cleared = cur;
       if (cur is num) cleared = cur.toInt();
       cleared = cleared.clamp(0, kLifelineTrainingLevels.length);
-      if (levelId != cleared + 1) return;
+      if (stageIndex != cleared + 1) return;
       tx.set(
         ref,
         {
-          'lifelineLevelsCleared': levelId,
+          'lifelineLevelsCleared': stageIndex,
           'volunteerXp': FieldValue.increment(xpReward),
           'updatedAt': FieldValue.serverTimestamp(),
         },

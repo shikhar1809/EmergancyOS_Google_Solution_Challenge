@@ -3,12 +3,10 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/l10n/app_localizations.dart';
 import '../core/utils/speech_web.dart'
     if (dart.library.io) '../core/utils/speech_io.dart';
-
-/// Opening line for active SOS (must match [SosActiveLockedScreen] sequence).
-const String kSosActiveOpeningGuidance =
-    'Your SOS is active. Help is on the way. Follow the spoken prompts and tap to answer.';
+import 'cloud_tts_service.dart';
 
 /// In-app **voice**: device TTS (Web Speech API on web, [FlutterTts] on mobile/desktop).
 ///
@@ -27,8 +25,16 @@ class VoiceCommsService {
   static bool silenceMode = false;
 
   static final List<_VoiceQueueItem> _queue = [];
-  static bool _speaking = false;
   static Timer? _stuckTimer;
+  static bool _draining = false;
+  static int _drainGeneration = 0;
+
+  /// Shown on SOS / volunteer when local + cloud TTS both fail (e.g. offline).
+  static final ValueNotifier<String?> ttsStatusNotifier =
+      ValueNotifier<String?>(null);
+
+  /// Localized string for the current cached app locale (no [BuildContext]).
+  static String tr(String key) => AppLocalizations.lookup(_cachedLocale, key);
 
   /// Latin-style sentence boundaries; text without these stays one segment (e.g. Hindi).
   static final RegExp _sentenceBoundary = RegExp(r'(?<=[.!?])\s+');
@@ -252,6 +258,7 @@ class VoiceCommsService {
   static void readAloudImmediate(String text) {
     final t = text.trim();
     if (t.isEmpty || silenceMode) return;
+    if (kIsWeb) bankUserGestureForWeb();
     // Never assume English when prefs have not been read yet — [_cachedLocale] may still
     // hold the last known code (e.g. hi). Forcing 'en' here broke Hindi/Indic TTS on web.
     final locale = _cachedLocale;
@@ -279,6 +286,7 @@ class VoiceCommsService {
   }
 
   static void clearSpeakQueue() {
+    _drainGeneration++;
     for (final item in _queue) {
       if (item.completer != null && !item.completer!.isCompleted) {
         item.completer!.complete();
@@ -286,7 +294,7 @@ class VoiceCommsService {
     }
     _queue.clear();
     _stuckTimer?.cancel();
-    _speaking = false;
+    _draining = false;
     cancelSpeechText();
   }
 
@@ -365,38 +373,83 @@ class VoiceCommsService {
       final c = i == segments.length - 1 ? completer : null;
       _queue.add(_VoiceQueueItem(segments[i], lang, c));
     }
-    if (!_speaking) _processQueue();
+    _startDrainIfNeeded();
   }
 
-  static void _processQueue() {
-    if (_queue.isEmpty) {
-      _speaking = false;
+  static void _startDrainIfNeeded() {
+    if (_draining || _queue.isEmpty) return;
+    unawaited(_drainQueue());
+  }
+
+  static void _emitTtsUnavailableBanner() {
+    final msg = AppLocalizations.lookup(_cachedLocale, 'voice_tts_unavailable_banner');
+    ttsStatusNotifier.value = msg;
+    Future<void>.delayed(const Duration(seconds: 4), () {
+      if (ttsStatusNotifier.value == msg) {
+        ttsStatusNotifier.value = null;
+      }
+    });
+  }
+
+  static Future<void> _drainQueue() async {
+    if (_draining) return;
+    _draining = true;
+    final gen = _drainGeneration;
+    try {
+      while (_queue.isNotEmpty && gen == _drainGeneration) {
+        final item = _queue.removeAt(0);
+        if (silenceMode) {
+          if (item.completer != null && !item.completer!.isCompleted) {
+            item.completer!.complete();
+          }
+          continue;
+        }
+
+        final stuckMs = (item.text.length * 220 + 12000).clamp(20000, 180000);
+
+        try {
+          final localOk = await nativeVoiceAvailable(item.lang);
+          if (!localOk) {
+            final mp3 = await CloudTtsService.synthesize(item.text, item.lang);
+            if (mp3 != null && mp3.isNotEmpty) {
+              await CloudTtsService.playMp3(mp3);
+            } else {
+              _emitTtsUnavailableBanner();
+            }
+          } else {
+            final utterDone = Completer<void>();
+            _stuckTimer?.cancel();
+            _stuckTimer = Timer(Duration(milliseconds: stuckMs), () {
+              debugPrint('[VoiceComms] TTS stuck after ${stuckMs}ms — advancing queue');
+              if (!utterDone.isCompleted) utterDone.complete();
+            });
+            speakText(
+              item.text,
+              lang: item.lang,
+              onDone: () {
+                if (!utterDone.isCompleted) utterDone.complete();
+              },
+            );
+            await utterDone.future;
+            _stuckTimer?.cancel();
+          }
+        } catch (e, st) {
+          debugPrint('[VoiceComms] utterance error: $e\n$st');
+          _emitTtsUnavailableBanner();
+        } finally {
+          _stuckTimer?.cancel();
+          if (item.completer != null && !item.completer!.isCompleted) {
+            item.completer!.complete();
+          }
+        }
+      }
+    } finally {
+      _draining = false;
       _stuckTimer?.cancel();
-      return;
+      if (gen == _drainGeneration && _queue.isNotEmpty) {
+        _startDrainIfNeeded();
+      }
     }
-    _speaking = true;
-    final item = _queue.removeAt(0);
-
-    // Last-resort watchdog only (onend/completion should win first). Conservative
-    // bounds avoid advancing the queue mid-utterance on slow TTS engines.
-    final stuckMs = (item.text.length * 220 + 12000).clamp(20000, 180000);
-    _stuckTimer?.cancel();
-    _stuckTimer = Timer(Duration(milliseconds: stuckMs), () {
-      debugPrint('[VoiceComms] TTS stuck after ${stuckMs}ms — advancing queue');
-      if (item.completer != null && !item.completer!.isCompleted) {
-        item.completer!.complete();
-      }
-      _speaking = false;
-      _processQueue();
-    });
-
-    speakText(item.text, lang: item.lang, onDone: () {
-      _stuckTimer?.cancel();
-      if (item.completer != null && !item.completer!.isCompleted) {
-        item.completer!.complete();
-      }
-      _processQueue();
-    });
   }
 }
 

@@ -8,6 +8,7 @@ import 'package:livekit_client/livekit_client.dart';
 import '../../../core/utils/livekit_ui_sounds.dart';
 import '../../../core/widgets/livekit_voice_party_strip.dart';
 import '../../../services/livekit_operations_service.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 /// Live voice between **hospital / command** and the **fleet unit assigned** to this incident.
 class OperationsChannelScreen extends StatefulWidget {
@@ -193,7 +194,7 @@ class _OperationsChannelScreenState extends State<OperationsChannelScreen> {
       backgroundColor: const Color(0xFF0D1117),
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
-        title: const Text('Operation channel'),
+        title: Text(context.opsTr('Operation channel')),
         actions: [
           if (connected)
             IconButton(

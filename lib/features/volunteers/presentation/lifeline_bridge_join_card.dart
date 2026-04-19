@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:livekit_client/livekit_client.dart';
 
+import '../../../core/l10n/app_localizations.dart';
 import '../../../core/providers/ops_integration_routing_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../services/livekit_emergency_bridge_service.dart';
@@ -161,7 +162,7 @@ class _LifelineBridgeJoinCardState extends ConsumerState<LifelineBridgeJoinCard>
     if (incidentId.isEmpty) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Incident ID is missing.')),
+        SnackBar(content: Text(AppLocalizations.of(context).get('bridge_card_incident_id_missing'))),
       );
       return;
     }
@@ -175,9 +176,9 @@ class _LifelineBridgeJoinCardState extends ConsumerState<LifelineBridgeJoinCard>
       if (pttOnly) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
               content: Text(
-                'Operations console routed victim voice via Firebase PTT. WebRTC bridge join is disabled.',
+                AppLocalizations.of(context).get('bridge_card_ptt_only_snackbar'),
               ),
               backgroundColor: Colors.orange,
             ),
@@ -219,8 +220,8 @@ class _LifelineBridgeJoinCardState extends ConsumerState<LifelineBridgeJoinCard>
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Connected to voice channel.'),
+          SnackBar(
+              content: Text(AppLocalizations.of(context).get('bridge_card_connected_snackbar')),
               backgroundColor: Colors.green),
         );
       }
@@ -228,7 +229,11 @@ class _LifelineBridgeJoinCardState extends ConsumerState<LifelineBridgeJoinCard>
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('Could not join: $e'),
+              content: Text(
+                AppLocalizations.of(context)
+                    .get('bridge_card_could_not_join')
+                    .replaceAll('{err}', '$e'),
+              ),
               backgroundColor: Colors.red),
         );
       }
@@ -305,31 +310,31 @@ class _LifelineBridgeJoinCardState extends ConsumerState<LifelineBridgeJoinCard>
 
   Future<void> _onJoinPressed() async {
     if (widget.showJoinCalmDisclaimer) {
+      final l10n = AppLocalizations.of(context);
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
           backgroundColor: const Color(0xFF1A1D2E),
-          title: const Text(
-            'Voice channel',
-            style: TextStyle(
+          title: Text(
+            l10n.get('bridge_card_voice_channel_title'),
+            style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
               fontSize: 18,
             ),
           ),
-          content: const Text(
-            'Maintain calm and speak clearly. A steady tone helps the victim and other responders. '
-            'Avoid shouting or rushing your words.',
-            style: TextStyle(color: Colors.white70, height: 1.4, fontSize: 14),
+          content: Text(
+            l10n.get('bridge_card_calm_disclaimer'),
+            style: const TextStyle(color: Colors.white70, height: 1.4, fontSize: 14),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
+              child: Text(l10n.get('bridge_card_cancel')),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Join voice'),
+              child: Text(l10n.get('bridge_card_join_voice')),
             ),
           ],
         ),
@@ -341,6 +346,7 @@ class _LifelineBridgeJoinCardState extends ConsumerState<LifelineBridgeJoinCard>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final connected = _room != null;
     final desk = _isEmergencyServicesDesk;
     final elite = _eliteVolunteerBridge;
@@ -374,9 +380,9 @@ class _LifelineBridgeJoinCardState extends ConsumerState<LifelineBridgeJoinCard>
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.orange.withValues(alpha: 0.35)),
               ),
-              child: const Text(
-                'Console routed voice via Firebase PTT — LiveKit bridge join is disabled for this fleet.',
-                style: TextStyle(
+              child: Text(
+                l10n.get('bridge_card_ptt_only_banner'),
+                style: const TextStyle(
                   color: Colors.orangeAccent,
                   fontSize: 11,
                   height: 1.3,
@@ -402,19 +408,19 @@ class _LifelineBridgeJoinCardState extends ConsumerState<LifelineBridgeJoinCard>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Emergency Voice Channel',
-                      style: TextStyle(
+                    Text(
+                      l10n.get('volunteer_bridge_voice_channel_title'),
+                      style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
                           fontSize: 13),
                     ),
                     Text(
                       desk == true
-                          ? 'You join as dispatch (emergency services desk on your profile).'
+                          ? l10n.get('volunteer_bridge_join_hint_desk')
                           : elite == true
-                              ? 'Join uses your elite volunteer access when you are an accepted responder; otherwise contact if your number matches.'
-                              : 'Join uses this incident: emergency contact if your number matches; otherwise accepted volunteer.',
+                              ? l10n.get('volunteer_bridge_join_hint_elite')
+                              : l10n.get('volunteer_bridge_join_hint_incident'),
                       style: const TextStyle(
                           color: Colors.white38, fontSize: 11),
                     ),
@@ -431,7 +437,7 @@ class _LifelineBridgeJoinCardState extends ConsumerState<LifelineBridgeJoinCard>
                 controller: _incidentIdController,
                 style: const TextStyle(color: Colors.white, fontSize: 13),
                 decoration: InputDecoration(
-                  hintText: 'Incident ID',
+                  hintText: l10n.get('volunteer_bridge_incident_id_hint'),
                   hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
                   filled: true,
                   fillColor: Colors.black26,
@@ -465,7 +471,9 @@ class _LifelineBridgeJoinCardState extends ConsumerState<LifelineBridgeJoinCard>
                     )
                   : const Icon(Icons.call_rounded, size: 18),
               label: Text(
-                _busy ? 'Connecting...' : 'Join Voice',
+                _busy
+                    ? l10n.get('volunteer_bridge_connecting_btn')
+                    : l10n.get('volunteer_bridge_join_voice_btn'),
                 style: const TextStyle(
                     fontWeight: FontWeight.bold, fontSize: 13),
               ),
@@ -482,6 +490,7 @@ class _LifelineBridgeJoinCardState extends ConsumerState<LifelineBridgeJoinCard>
   }
 
   Widget _buildConnectedState() {
+    final l10n = AppLocalizations.of(context);
     final pCount = _participants.length + 1; // +1 for self
 
     return Container(
@@ -512,10 +521,10 @@ class _LifelineBridgeJoinCardState extends ConsumerState<LifelineBridgeJoinCard>
                 ),
               ),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'Voice Connected',
-                  style: TextStyle(
+                  l10n.get('bridge_card_voice_connected'),
+                  style: const TextStyle(
                     color: Color(0xFF3BA55D),
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
@@ -523,7 +532,9 @@ class _LifelineBridgeJoinCardState extends ConsumerState<LifelineBridgeJoinCard>
                 ),
               ),
               Text(
-                '$pCount in channel',
+                l10n
+                    .get('bridge_card_in_channel')
+                    .replaceAll('{n}', '$pCount'),
                 style: const TextStyle(color: Colors.white38, fontSize: 11),
               ),
             ],
@@ -567,7 +578,9 @@ class _LifelineBridgeJoinCardState extends ConsumerState<LifelineBridgeJoinCard>
                 ),
               ),
               child: Text(
-                _pttHeld ? 'Transmitting…' : 'Hold to talk',
+                _pttHeld
+                    ? l10n.get('bridge_card_transmitting')
+                    : l10n.get('bridge_card_hold_to_talk'),
                 style: TextStyle(
                   color: _pttHeld ? Colors.white : Colors.white70,
                   fontWeight: FontWeight.w800,
@@ -583,8 +596,8 @@ class _LifelineBridgeJoinCardState extends ConsumerState<LifelineBridgeJoinCard>
             child: FilledButton.icon(
               onPressed: _busy ? null : () => unawaited(_leave()),
               icon: const Icon(Icons.call_end_rounded, size: 16),
-              label: const Text('Disconnect',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              label: Text(l10n.get('bridge_card_disconnect'),
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
               style: FilledButton.styleFrom(
                 backgroundColor: Colors.red.shade700,
                 shape: RoundedRectangleBorder(

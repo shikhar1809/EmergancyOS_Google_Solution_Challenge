@@ -126,3 +126,18 @@ build_output*.txt
 build_web_verbose.txt
 *.iml
 
+# Stray root scratch / help dumps (never commit)
+/analysis.txt
+/full_analyze.txt
+/latest_analyze.txt
+/verbose.txt
+/web_help.txt
+/web_build_error_check.txt
+/foo.txt
+/dart_analyze.txt
+/auth_config.json
+
+# Local Firebase / Flutter tool caches (regenerated on build)
+.firebase/
+.flutter-plugins-dependencies
+

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../../services/ops_system_health_service.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 /// Master console: compact GCP / LiveKit / SMS status with periodic refresh.
 class OpsSystemStatusStrip extends StatefulWidget {
@@ -60,7 +61,7 @@ class _OpsSystemStatusStripState extends State<OpsSystemStatusStrip> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1E293B),
-        title: const Text('System status', style: TextStyle(color: Colors.white)),
+        title: Text(context.opsTr('System status'), style: TextStyle(color: Colors.white)),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -87,14 +88,14 @@ class _OpsSystemStatusStripState extends State<OpsSystemStatusStrip> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
+            child: Text(context.opsTr('Close')),
           ),
           FilledButton(
             onPressed: () {
               Navigator.pop(ctx);
               unawaited(_load());
             },
-            child: const Text('Refresh'),
+            child: Text(context.opsTr('Refresh')),
           ),
         ],
       ),

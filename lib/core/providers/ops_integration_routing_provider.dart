@@ -8,7 +8,8 @@ final opsIntegrationRoutingProvider = StreamProvider<OpsIntegrationRouting>((ref
   return OpsIntegrationRoutingService.watchGlobal();
 });
 
-/// True when maps should use Leaflet/OSM: **remote** `leaflet` **or** local auto-fallback (quota/auth).
+/// True when maps should use OSM/flutter_map: Firestore `mapsTiles: leaflet`, or local
+/// auto-fallback after Google Maps failure (see [mapsLeafletFallbackProvider]).
 final effectiveMapsUseLeafletProvider = Provider<bool>((ref) {
   final routing = ref.watch(opsIntegrationRoutingProvider).whenOrNull(data: (v) => v) ??
       OpsIntegrationRouting.defaults;

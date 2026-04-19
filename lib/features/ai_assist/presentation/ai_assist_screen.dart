@@ -2,7 +2,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/physics.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -37,6 +36,7 @@ class _AIAssistScreenState extends State<AIAssistScreen> {
   int _activePage = 0;
   double _pageValue = 0;
   bool _emergencyMode = false;
+  String? _handledOpenAid;
 
   static const _levels = kLifelineTrainingLevels;
 
@@ -45,6 +45,28 @@ class _AIAssistScreenState extends State<AIAssistScreen> {
     super.initState();
     _pageController = PageController();
     _pageController.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _applyOpenAid());
+  }
+
+  @override
+  void didUpdateWidget(covariant AIAssistScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.openAid != widget.openAid) {
+      _handledOpenAid = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _applyOpenAid());
+    }
+  }
+
+  void _applyOpenAid() {
+    final raw = widget.openAid?.trim();
+    if (raw == null || raw.isEmpty) return;
+    if (raw == _handledOpenAid) return;
+    final id = int.tryParse(raw);
+    if (id == null) return;
+    final idx = _levels.indexWhere((l) => l.id == id);
+    if (idx < 0) return;
+    _handledOpenAid = raw;
+    _goToPage(idx);
   }
 
   void _onScroll() {
@@ -54,13 +76,37 @@ class _AIAssistScreenState extends State<AIAssistScreen> {
     }
   }
 
-  void _goToPage(int index) {
+  /// [fromSearch] uses [PageController.jumpToPage] and syncs [_activePage] /
+  /// [_pageValue] immediately so the correct guide opens even when custom
+  /// snap physics or overlay timing would fight a long [animateToPage].
+  void _goToPage(int index, {bool fromSearch = false}) {
+    if (index < 0 || index >= _levels.length) return;
     HapticFeedback.lightImpact();
-    _pageController.animateToPage(
-      index,
-      duration: const Duration(milliseconds: 500),
-      curve: Curves.easeOutCubic,
-    );
+
+    void run(int retries) {
+      if (!_pageController.hasClients) {
+        if (retries > 12) return;
+        WidgetsBinding.instance.addPostFrameCallback((_) => run(retries + 1));
+        return;
+      }
+      if (fromSearch) {
+        _pageController.jumpToPage(index);
+        if (mounted) {
+          setState(() {
+            _activePage = index;
+            _pageValue = index.toDouble();
+          });
+        }
+      } else {
+        _pageController.animateToPage(
+          index,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    }
+
+    run(0);
   }
 
   void _toggleEmergencyMode() {
@@ -126,30 +172,53 @@ class _AIAssistScreenState extends State<AIAssistScreen> {
                 l10n: l,
               ),
               Expanded(
-                child: PageView.builder(
-                  controller: _pageController,
-                  scrollDirection: Axis.vertical,
-                  physics: const _SnapScrollPhysics(),
-                  itemCount: _levels.length,
-                  onPageChanged: (i) {
-                    HapticFeedback.selectionClick();
-                    setState(() => _activePage = i);
-                    SemanticsService.announce(
-                      l.aiAssistRailSemantics(i + 1, _levels[i].title),
-                      Directionality.of(context),
-                    );
-                  },
-                  itemBuilder: (context, index) {
-                    return GuideDetailPage(
-                      key: ValueKey('guide_${index}_$_emergencyMode'),
-                      level: _levels[index],
-                      isActive: _activePage == index,
-                      pageIndex: index,
-                      totalPages: _levels.length,
-                      safePadding: safePad,
-                      emergencyMode: _emergencyMode,
-                    );
-                  },
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.only(
+                        top: safePad.top +
+                            (widget.isDrillShell ? 46 : 12) +
+                            4,
+                        left: 10,
+                        right: 10,
+                        bottom: 10,
+                      ),
+                      child: _ScenarioSearchBar(
+                        levels: _levels,
+                        onSelect: (idx) => _goToPage(idx, fromSearch: true),
+                      ),
+                    ),
+                    Expanded(
+                      child: PageView.builder(
+                        controller: _pageController,
+                        scrollDirection: Axis.vertical,
+                        physics: const PageScrollPhysics(
+                          parent: BouncingScrollPhysics(),
+                        ),
+                        itemCount: _levels.length,
+                        onPageChanged: (i) {
+                          HapticFeedback.selectionClick();
+                          setState(() => _activePage = i);
+                          SemanticsService.announce(
+                            l.aiAssistRailSemantics(i + 1, _levels[i].title),
+                            Directionality.of(context),
+                          );
+                        },
+                        itemBuilder: (context, index) {
+                          return GuideDetailPage(
+                            key: ValueKey('guide_${index}_$_emergencyMode'),
+                            level: _levels[index],
+                            isActive: _activePage == index,
+                            pageIndex: index,
+                            totalPages: _levels.length,
+                            safePadding: safePad,
+                            emergencyMode: _emergencyMode,
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -158,11 +227,311 @@ class _AIAssistScreenState extends State<AIAssistScreen> {
             activeLevelIndex: _activePage,
             activeLevelTitle: _levels[_activePage].title,
             safePadding: safePad,
+            isDrillShell: widget.isDrillShell,
           ),
         ],
       ),
     );
   }
+}
+
+/// Compact, glassmorphic search bar that filters the Lifeline scenario library
+/// by title / subtitle / red flags / cautions and jumps to the chosen entry.
+class _ScenarioSearchBar extends StatefulWidget {
+  final List<LifelineTrainingLevel> levels;
+  final ValueChanged<int> onSelect;
+
+  const _ScenarioSearchBar({
+    required this.levels,
+    required this.onSelect,
+  });
+
+  @override
+  State<_ScenarioSearchBar> createState() => _ScenarioSearchBarState();
+}
+
+class _ScenarioSearchBarState extends State<_ScenarioSearchBar> {
+  final TextEditingController _controller = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
+  String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  List<_ScenarioMatch> _matches() {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return const [];
+    final results = <_ScenarioMatch>[];
+    for (var i = 0; i < widget.levels.length; i++) {
+      final lvl = widget.levels[i];
+      final title = lvl.title.toLowerCase();
+      final subtitle = lvl.subtitle.toLowerCase();
+      final redFlags = lvl.redFlags.join(' ').toLowerCase();
+      final cautions = lvl.cautions.join(' ').toLowerCase();
+
+      int score;
+      if (title.startsWith(q)) {
+        score = 0;
+      } else if (title.contains(q)) {
+        score = 1;
+      } else if (subtitle.contains(q)) {
+        score = 2;
+      } else if (redFlags.contains(q)) {
+        score = 3;
+      } else if (cautions.contains(q)) {
+        score = 4;
+      } else {
+        continue;
+      }
+      results.add(_ScenarioMatch(index: i, level: lvl, score: score));
+    }
+    results.sort((a, b) {
+      final c = a.score.compareTo(b.score);
+      if (c != 0) return c;
+      return a.level.title.compareTo(b.level.title);
+    });
+    return results.take(8).toList();
+  }
+
+  void _clear() {
+    _controller.clear();
+    setState(() => _query = '');
+  }
+
+  void _jumpTo(int idx) {
+    // Navigate first so PageView updates before the dropdown collapses
+    // (unfocusing first can drop the result list and swallow follow-up work).
+    widget.onSelect(idx);
+    _controller.clear();
+    setState(() => _query = '');
+    _focusNode.unfocus();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final matches = _matches();
+    final hasQuery = _query.trim().isNotEmpty;
+    final showResults = hasQuery && _focusNode.hasFocus;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: AppColors.surface.withValues(alpha: 0.78),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: _focusNode.hasFocus
+                  ? AppColors.primaryInfo.withValues(alpha: 0.55)
+                  : AppColors.stroke.withValues(alpha: 0.6),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.18),
+                blurRadius: 14,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              const SizedBox(width: 10),
+              Icon(
+                Icons.search_rounded,
+                size: 18,
+                color: AppColors.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  focusNode: _focusNode,
+                  onChanged: (v) => setState(() => _query = v),
+                  onSubmitted: (_) {
+                    if (matches.isNotEmpty) _jumpTo(matches.first.index);
+                  },
+                  textInputAction: TextInputAction.search,
+                  style: GoogleFonts.inter(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                  cursorColor: AppColors.primaryInfo,
+                  decoration: InputDecoration(
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    hintText: 'Search emergency scenarios…',
+                    hintStyle: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textSecondary.withValues(alpha: 0.75),
+                    ),
+                  ),
+                ),
+              ),
+              if (hasQuery)
+                IconButton(
+                  tooltip: 'Clear',
+                  icon: const Icon(Icons.close_rounded, size: 16),
+                  color: AppColors.textSecondary,
+                  splashRadius: 16,
+                  padding: const EdgeInsets.all(6),
+                  constraints: const BoxConstraints(),
+                  onPressed: _clear,
+                )
+              else
+                const SizedBox(width: 8),
+            ],
+          ),
+        ),
+        if (showResults)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Material(
+              color: Colors.transparent,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: AppColors.surface.withValues(alpha: 0.96),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: AppColors.stroke.withValues(alpha: 0.6),
+                    width: 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 280),
+                  child: matches.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 14, horizontal: 14),
+                          child: Text(
+                            'No scenarios match "${_query.trim()}"',
+                            style: GoogleFonts.inter(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        )
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          physics: const ClampingScrollPhysics(),
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          itemCount: matches.length,
+                          separatorBuilder: (context, _) => Divider(
+                            height: 1,
+                            thickness: 1,
+                            color: AppColors.stroke.withValues(alpha: 0.35),
+                          ),
+                          itemBuilder: (ctx, i) {
+                            final m = matches[i];
+                            return InkWell(
+                              onTap: () => _jumpTo(m.index),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 10),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 32,
+                                      height: 32,
+                                      decoration: BoxDecoration(
+                                        color: m.level.accent
+                                            .withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(9),
+                                        border: Border.all(
+                                          color: m.level.accent
+                                              .withValues(alpha: 0.5),
+                                          width: 1,
+                                        ),
+                                      ),
+                                      child: Icon(
+                                        m.level.icon,
+                                        size: 18,
+                                        color: m.level.accent,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            m.level.title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: GoogleFonts.inter(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w700,
+                                              color: AppColors.textPrimary,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            m.level.subtitle,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: GoogleFonts.inter(
+                                              fontSize: 11.5,
+                                              fontWeight: FontWeight.w500,
+                                              color: AppColors.textSecondary,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.arrow_forward_rounded,
+                                      size: 16,
+                                      color: AppColors.textSecondary
+                                          .withValues(alpha: 0.7),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ScenarioMatch {
+  final int index;
+  final LifelineTrainingLevel level;
+  final int score;
+  const _ScenarioMatch({
+    required this.index,
+    required this.level,
+    required this.score,
+  });
 }
 
 class _SlidingRail extends StatelessWidget {
@@ -202,7 +571,7 @@ class _SlidingRail extends StatelessWidget {
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 400),
-      width: 62,
+      width: 70,
       decoration: BoxDecoration(
         color: emergencyMode
             ? AppColors.primaryDanger.withValues(alpha: 0.12)
@@ -226,7 +595,6 @@ class _SlidingRail extends StatelessWidget {
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final totalH = constraints.maxHeight;
-                  final itemH = math.max(48.0, totalH / levels.length);
                   final indicatorAccent = _lerpAccent();
 
                   return SingleChildScrollView(
@@ -237,7 +605,7 @@ class _SlidingRail extends StatelessWidget {
                         children: [
                           // Vertical track line
                           Positioned(
-                            left: 30,
+                            left: 34,
                             top: (totalH / levels.length) * 0.5,
                             bottom: (totalH / levels.length) * 0.5,
                             child: Container(
@@ -259,10 +627,10 @@ class _SlidingRail extends StatelessWidget {
                             height: totalH / levels.length,
                             child: Center(
                               child: Container(
-                                width: 46,
-                                height: 46,
+                                width: 52,
+                                height: 52,
                                 decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(15),
+                                  borderRadius: BorderRadius.circular(16),
                                   color: indicatorAccent.withValues(alpha: 0.12),
                                   border: Border.all(
                                     color: indicatorAccent.withValues(alpha: 0.5),
@@ -271,12 +639,12 @@ class _SlidingRail extends StatelessWidget {
                                   boxShadow: [
                                     BoxShadow(
                                       color: indicatorAccent.withValues(alpha: 0.3),
-                                      blurRadius: 20,
+                                      blurRadius: 22,
                                       spreadRadius: 2,
                                     ),
                                     BoxShadow(
                                       color: indicatorAccent.withValues(alpha: 0.1),
-                                      blurRadius: 40,
+                                      blurRadius: 44,
                                       spreadRadius: 6,
                                     ),
                                   ],
@@ -287,7 +655,7 @@ class _SlidingRail extends StatelessWidget {
 
                           // Track progress fill
                           Positioned(
-                            left: 30,
+                            left: 34,
                             top: (totalH / levels.length) * 0.5,
                             width: 2,
                             height: math.max(0, currentPage * (totalH / levels.length)),
@@ -306,13 +674,16 @@ class _SlidingRail extends StatelessWidget {
                             ),
                           ),
 
-                          // Icon buttons
+                          // Icon buttons — ring of sizes around the active page
                           ...List.generate(levels.length, (i) {
                             final level = levels[i];
                             final dist = (currentPage - i).abs();
-                            final isNearest = dist < 0.5;
-                            final scale = (1.0 - dist * 0.08).clamp(0.7, 1.0);
-                            final opacity = (1.0 - dist * 0.15).clamp(0.35, 1.0);
+                            // Continuous ramp: 0→28, 1→23, 2→19, 3+→15
+                            final size =
+                                (28.0 - dist * 4.5).clamp(14.0, 28.0).toDouble();
+                            final opacity =
+                                (1.0 - dist * 0.22).clamp(0.4, 1.0).toDouble();
+                            final isActive = dist < 0.5;
                             final perItemH = totalH / levels.length;
 
                             return Positioned(
@@ -328,19 +699,18 @@ class _SlidingRail extends StatelessWidget {
                                   onTap: () => onTap(i),
                                   behavior: HitTestBehavior.opaque,
                                   child: Center(
-                                    child: Transform.scale(
-                                      scale: scale,
-                                      child: Opacity(
-                                        opacity: opacity,
-                                        child: Icon(
-                                          level.icon,
-                                          size: isNearest ? 21 : 16,
-                                          semanticLabel: level.title,
-                                          color: isNearest
-                                              ? (emergencyMode ? AppColors.primaryDanger : level.accent)
-                                              : AppColors.textSecondary
-                                                  .withValues(alpha: 0.5),
-                                        ),
+                                    child: Opacity(
+                                      opacity: opacity,
+                                      child: Icon(
+                                        level.icon,
+                                        size: size,
+                                        semanticLabel: level.title,
+                                        color: isActive
+                                            ? (emergencyMode
+                                                ? AppColors.primaryDanger
+                                                : level.accent)
+                                            : AppColors.textSecondary
+                                                .withValues(alpha: 0.6),
                                       ),
                                     ),
                                   ),
@@ -424,47 +794,3 @@ class _SlidingRail extends StatelessWidget {
   }
 }
 
-/// Snaps crisply to whichever page the user drags/flings toward.
-class _SnapScrollPhysics extends ScrollPhysics {
-  const _SnapScrollPhysics({super.parent});
-
-  @override
-  _SnapScrollPhysics applyTo(ScrollPhysics? ancestor) =>
-      _SnapScrollPhysics(parent: buildParent(ancestor));
-
-  @override
-  SpringDescription get spring => const SpringDescription(
-        mass: 0.8,
-        stiffness: 300,
-        damping: 28,
-      );
-
-  double _getTargetPixels(
-      ScrollMetrics position, Tolerance tolerance, double velocity) {
-    double page = position.pixels / position.viewportDimension;
-    if (velocity < -tolerance.velocity) {
-      page -= 0.4;
-    } else if (velocity > tolerance.velocity) {
-      page += 0.4;
-    }
-    return page.roundToDouble() * position.viewportDimension;
-  }
-
-  @override
-  Simulation? createBallisticSimulation(
-      ScrollMetrics position, double velocity) {
-    if ((velocity <= 0.0 && position.pixels <= position.minScrollExtent) ||
-        (velocity >= 0.0 && position.pixels >= position.maxScrollExtent)) {
-      return super.createBallisticSimulation(position, velocity);
-    }
-    final target = _getTargetPixels(position, toleranceFor(position), velocity);
-    if (target != position.pixels) {
-      return ScrollSpringSimulation(spring, position.pixels, target, velocity,
-          tolerance: toleranceFor(position));
-    }
-    return null;
-  }
-
-  @override
-  bool get allowImplicitScrolling => false;
-}

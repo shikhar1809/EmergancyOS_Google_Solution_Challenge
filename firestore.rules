@@ -3,6 +3,47 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    /// Master ops email (must match `functions/index.js` `isMasterConsoleEmailToken`).
+    /// Accepts both the correct spelling and the legacy typo so we don't break
+    /// any existing bound console account while the rename is rolling out.
+    function isMasterOpsConsoleEmail() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && (
+          request.auth.token.email.lower() == 'admin@emergencyos.com'
+          || request.auth.token.email.lower() == 'admin@emeregencyos.com'
+        );
+    }
+
+    /// Fleet / EMS operator accounts (separately-deployed fleet panel).
+    function isFleetOperator() {
+      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(userPath) && (
+        get(userPath).data.get('isFleetOperator', false) == true
+        || get(userPath).data.get('role', '') == 'fleet'
+      );
+    }
+
+    /// Hospital staff: `users/{uid}.staffHospitalId` or `boundHospitalDocId` matches doc id.
+    function userHospitalBindingMatches(hospitalDocId) {
+      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(userPath) && (
+        get(userPath).data.get('staffHospitalId', '') == hospitalDocId
+        || get(userPath).data.get('boundHospitalDocId', '') == hospitalDocId
+      );
+    }
+
+    /// Keys hospital Live Ops / analytics may merge (not credentials or gate secrets).
+    function opsHospitalLiveOpsMutableKeysOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly([
+          'bedsAvailable', 'bedsTotal', 'traumaBedsNote',
+          'offeredServices', 'hasBloodBank', 'mapListingOnline',
+          'doctorsOnDuty', 'specialistsOnCall', 'bloodUnitsAvailable',
+          'updatedAt', 'lat', 'lng', 'geohash'
+        ]);
+    }
+
     // ── Users: own profile read/write; Cloud Functions use Admin SDK (bypasses rules) ──
     match /users/{uid} {
       allow read:  if request.auth != null && request.auth.uid == uid;
@@ -15,18 +56,31 @@ service cloud.firestore {
       allow write: if request.auth != null && request.auth.uid == uid;
     }
 
-    // ── SOS Incidents: victim creates, all authenticated read, CF handles updates ──
+    // ── SOS Incidents: victim creates, authenticated peers read, CF owns writes ──
+    //
+    // NOTE: `allow read` is intentionally broad because the main app needs to
+    // stream the live incident pool for the volunteer map, leaderboard counts,
+    // and peer situational awareness. A follow-up will move these aggregations
+    // to server-computed public views (see docs/SECURITY.md → "Incident read
+    // scoping roadmap") so we can tighten this rule without breaking clients.
     match /sos_incidents/{id} {
       allow create: if request.auth != null
                     && request.resource.data.userId == request.auth.uid;
       allow read:   if request.auth != null;
-      // Victim and accepted volunteers can merge limited fields (e.g. volunteer location)
+      // Victim, accepted volunteers, and allotted EMS / crane units (fleet app) can update.
       allow update: if request.auth != null
                     && (
                       request.auth.uid == resource.data.userId
-                      || request.auth.uid in (resource.data.acceptedVolunteerIds ?? [])
+                      || request.auth.uid in resource.data.get('acceptedVolunteerIds', [])
+                      || request.auth.uid == resource.data.emsAcceptedBy
+                      || request.auth.uid == resource.data.craneUnitAcceptedBy
                     );
-      allow delete: if false; // Cloud Functions handle archival only
+      // Client-side archive (victim resolve / fleet response complete) removes active doc.
+      allow delete: if request.auth != null
+                    && (
+                      request.auth.uid == resource.data.userId
+                      || request.auth.uid == resource.data.emsAcceptedBy
+                    );
     }
 
     // ── Incident archive: read-only; CF writes via Admin SDK ─────────────────
@@ -35,10 +89,31 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // ── Hospital registry: read for authenticated; write via CF only ──────────
+    // ── Narrative incident reports: staff UI reads via collectionGroup, ──────
+    //    clients generate one after an incident closes. Create only; no
+    //    after-the-fact mutation.
+    match /{path=**}/incident_reports/{reportId} {
+      allow read:   if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if false;
+    }
+
+    // ── Counters (incident sequence numbers per area) ─────────────────────────
+    //    Transactional writes from the client; safe to share since IDs are
+    //    opaque integers not tied to PII.
+    match /counters/{id} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // ── Hospital registry: read for authenticated; staff merge Live Ops fields ─
     match /ops_hospitals/{id} {
       allow read:  if request.auth != null;
-      allow write: if false;
+      allow create, delete: if false;
+      allow update: if request.auth != null && (
+        isMasterOpsConsoleEmail()
+        || (userHospitalBindingMatches(id) && opsHospitalLiveOpsMutableKeysOnly())
+      );
     }
 
     // ── Hospital assignments: read for authenticated; CF writes only ──────────

@@ -5,8 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:livekit_client/livekit_client.dart';
 
+import '../../../core/widgets/language_switcher_button.dart';
 import '../../../core/widgets/livekit_voice_party_strip.dart';
 import '../../../services/livekit_comms_bridge_service.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 /// LiveKit **operation** comms room (`commsop_*`) — hospital / command coordination (not Firebase PTT).
 class FleetCommsOperationScreen extends StatefulWidget {
@@ -164,8 +166,9 @@ class _FleetCommsOperationScreenState extends State<FleetCommsOperationScreen> {
       backgroundColor: const Color(0xFF0D1117),
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
-        title: const Text('Operator channel (LiveKit)'),
+        title: Text(context.opsTr('Operator channel (LiveKit)')),
         actions: [
+          const LanguageSwitcherButton(),
           if (connected)
             IconButton(
               icon: Icon(_micOn ? Icons.mic : Icons.mic_off),
@@ -184,9 +187,7 @@ class _FleetCommsOperationScreenState extends State<FleetCommsOperationScreen> {
                 style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Hospital / command operations net for this incident. Mute when not speaking.',
-                style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.35),
+              Text(context.opsTr('Hospital / command operations net for this incident. Mute when not speaking.'), style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.35),
               ),
               const SizedBox(height: 20),
               if (connected) ...[

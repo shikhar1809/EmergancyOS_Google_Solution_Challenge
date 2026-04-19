@@ -1,3 +1,7 @@
+// Many fields and helpers below are reserved for upcoming map layers
+// (AQI / outbreak / mock hotspot drills). Suppressed until wired into the UI.
+// ignore_for_file: unused_field, unused_element, unused_element_parameter
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -8,6 +12,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:emergency_os/core/maps/eos_hybrid_map.dart';
 import 'package:emergency_os/core/maps/ops_map_controller.dart';
 import 'package:http/http.dart' as http;
+import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -40,6 +45,9 @@ import 'package:emergency_os/services/offline_map_pack_service.dart';
 import 'package:emergency_os/core/utils/map_platform.dart';
 import 'package:emergency_os/features/map/domain/emergency_zone_classification.dart';
 import 'widgets/offline_emergency_directory.dart';
+import 'package:emergency_os/services/emergency_services_data.dart';
+import 'package:emergency_os/services/environmental_data_service.dart';
+import 'package:emergency_os/services/regional_health_alerts_service.dart';
 
 class MapScreen extends ConsumerStatefulWidget {
   const MapScreen({super.key, this.isDrillShell = false});
@@ -74,7 +82,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
   /// Layer toggles for the map. Emergency services = hospital directory.
   bool _mapShowEmergencyServices = true;
   /// Only the nearest facility per type (within grid radius).
-  bool _mapNearestOnly = false;
+  final bool _mapNearestOnly = false;
   /// Live SOS pins + past incidents in the area (chip: "Live SOS").
   bool _mapShowPastIncidents = true;
   /// Hex response zones (annulus tiers to 30 km) from grid radius + service counts.
@@ -84,6 +92,22 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
   bool _zonePanelExpanded = true;
   /// Main map: past incident pins for the current hex only (toggled via Zone Info).
   bool _showPastIncidentsForZone = false;
+
+  /// New emergency service layers
+  bool _mapShowPharmacies = false;
+  bool _mapShowCoolingCenters = false;
+  bool _mapShowBloodBanks = false;
+  final bool _mapShowOutbreaks = false;
+  final bool _mapShowAQI = false;
+
+  /// New service data
+  List<PharmacyPlace> _pharmacies = [];
+  List<CoolingCenter> _coolingCenters = [];
+  List<BloodBankInfo> _bloodBanks = [];
+  List<DiseaseOutbreak> _outbreaks = [];
+  AQIInfo? _aqiInfo;
+  String _pharmacyMedicineFilter = '';
+
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _volunteerDutySub;
   StreamSubscription<List<OpsHospitalRow>>? _opsHospitalsSub;
   List<OpsHospitalRow> _opsHospitalRows = [];
@@ -122,6 +146,10 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
   BitmapDescriptor? _volunteerDutyIcon;
   BitmapDescriptor? _volunteerMaleIcon;
   BitmapDescriptor? _volunteerFemaleIcon;
+  BitmapDescriptor? _pharmacyIcon;
+  BitmapDescriptor? _coolingCenterIcon;
+  BitmapDescriptor? _bloodBankIcon;
+  BitmapDescriptor? _outbreakIcon;
 
   late AnimationController _rotationController;
   late AnimationController _pulseController;
@@ -142,7 +170,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
   List<SosIncident> _pastIncidents = [];
   AreaIntelligence _areaIntel = AreaIntelligence.empty();
   bool _loadingPastIncidents = false;
-  bool _showHeatmaps = true;
+  final bool _showHeatmaps = true;
   /// Demo: random heat blobs near you (Hotspot button).
   bool _mockHotspotsOn = false;
   final List<LatLng> _mockHotspotCenters = [];
@@ -191,6 +219,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
       if (!_mapNearestOnly) return inGrid;
       return [_nearestPlace(inGrid)];
     }
+    if (!_mapNearestOnly) return [];
     return [_nearestPlace(_hospitals)];
   }
 
@@ -285,7 +314,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
     } else {
       _startScanSequence();
     }
-
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadEmergencyServicesData());
     if (!widget.isDrillShell) {
       _mapShowPastIncidents = false;
       _mapShowVolunteers = false;
@@ -386,6 +415,11 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
     _incidentChokingMarker = await MapMarkerGenerator.getMinimalPin(Icons.air_rounded, const Color(0xFF26C6DA));
     _incidentDefaultMarker = await MapMarkerGenerator.getMinimalPin(Icons.emergency_rounded, AppColors.primaryDanger);
 
+    _pharmacyIcon = await MapMarkerGenerator.getMinimalPin(Icons.local_pharmacy_rounded, const Color(0xFF26A69A));
+    _coolingCenterIcon = await MapMarkerGenerator.getMinimalPin(Icons.ac_unit_rounded, const Color(0xFF42A5F5));
+    _bloodBankIcon = await MapMarkerGenerator.getMinimalPin(Icons.bloodtype_rounded, const Color(0xFFE53935));
+    _outbreakIcon = await MapMarkerGenerator.getMinimalPin(Icons.warning_rounded, const Color(0xFFFF9800));
+
     if (context.mounted) setState(() {});
   }
 
@@ -421,6 +455,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
           _bumpUserCourseFrom(position);
           _currentPosition = position;
         });
+        unawaited(_loadEmergencyServicesData());
       }
 
       if (!widget.isDrillShell) {
@@ -662,6 +697,298 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
     );
   }
 
+  void _showPharmacyDetailSheet(PharmacyPlace p) {
+    final dist = _currentPosition == null
+        ? null
+        : Geolocator.distanceBetween(_currentPosition!.latitude, _currentPosition!.longitude, p.lat, p.lng);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          margin: const EdgeInsets.fromLTRB(14, 0, 14, 18),
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+          decoration: BoxDecoration(
+            color: AppColors.surface.withValues(alpha: 0.94),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.local_pharmacy_rounded, color: const Color(0xFF26A69A)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(p.name, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
+                  ),
+                  if (p.is24Hours)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(color: const Color(0xFF26A69A), borderRadius: BorderRadius.circular(8)),
+                      child: const Text('24hr', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text('Pharmacy', style: TextStyle(color: const Color(0xFF26A69A).withValues(alpha: 0.85), fontSize: 11, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 8),
+              Text(p.vicinity, style: const TextStyle(color: Colors.white60, fontSize: 13)),
+              if (dist != null) ...[
+                const SizedBox(height: 6),
+                Text('${(dist / 1000).toStringAsFixed(1)} km away', style: const TextStyle(color: AppColors.primaryInfo, fontWeight: FontWeight.w700, fontSize: 12)),
+              ],
+              if (p.availableMedicines.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Text('Available Medicines', style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: p.availableMedicines.map((med) => Chip(
+                    label: Text(med, style: const TextStyle(fontSize: 10, color: Colors.white)),
+                    backgroundColor: const Color(0xFF26A69A).withValues(alpha: 0.3),
+                    padding: EdgeInsets.zero,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  )).toList(),
+                ),
+              ],
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        final uri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}');
+                        if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      },
+                      icon: const Icon(Icons.navigation_rounded, size: 20),
+                      label: const Text('Navigate'),
+                      style: FilledButton.styleFrom(backgroundColor: AppColors.primaryInfo, foregroundColor: Colors.white),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  IconButton.filledTonal(
+                    onPressed: () async {
+                      final uri = Uri.parse('tel:${p.phoneNumber}');
+                      if (await canLaunchUrl(uri)) await launchUrl(uri);
+                    },
+                    icon: const Icon(Icons.phone_in_talk_rounded),
+                    tooltip: 'Call',
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showCoolingCenterDetailSheet(CoolingCenter c) {
+    final dist = _currentPosition == null
+        ? null
+        : Geolocator.distanceBetween(_currentPosition!.latitude, _currentPosition!.longitude, c.lat, c.lng);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          margin: const EdgeInsets.fromLTRB(14, 0, 14, 18),
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+          decoration: BoxDecoration(
+            color: AppColors.surface.withValues(alpha: 0.94),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.ac_unit_rounded, color: const Color(0xFF42A5F5)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(c.name, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text('UP Govt Cooling Center', style: TextStyle(color: const Color(0xFF42A5F5).withValues(alpha: 0.85), fontSize: 11, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 8),
+              Text(c.address, style: const TextStyle(color: Colors.white60, fontSize: 13)),
+              if (c.operatingHours != null) ...[
+                const SizedBox(height: 4),
+                Text('Hours: ${c.operatingHours}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              ],
+              if (dist != null) ...[
+                const SizedBox(height: 6),
+                Text('${(dist / 1000).toStringAsFixed(1)} km away', style: const TextStyle(color: AppColors.primaryInfo, fontWeight: FontWeight.w700, fontSize: 12)),
+              ],
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  if (c.hasORS)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(color: const Color(0xFFFF9800).withValues(alpha: 0.3), borderRadius: BorderRadius.circular(8)),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.water_drop_rounded, size: 14, color: Color(0xFFFF9800)),
+                          SizedBox(width: 4),
+                          Text('ORS Available', style: TextStyle(fontSize: 11, color: Color(0xFFFF9800), fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                  if (c.hasMedicalSupport) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(color: const Color(0xFFE53935).withValues(alpha: 0.3), borderRadius: BorderRadius.circular(8)),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.medical_services_rounded, size: 14, color: Color(0xFFE53935)),
+                          SizedBox(width: 4),
+                          Text('Medical Support', style: TextStyle(fontSize: 11, color: Color(0xFFE53935), fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        final uri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}');
+                        if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      },
+                      icon: const Icon(Icons.navigation_rounded, size: 20),
+                      label: const Text('Navigate'),
+                      style: FilledButton.styleFrom(backgroundColor: AppColors.primaryInfo, foregroundColor: Colors.white),
+                    ),
+                  ),
+                  if (c.phoneNumber.isNotEmpty) ...[
+                    const SizedBox(width: 10),
+                    IconButton.filledTonal(
+                      onPressed: () async {
+                        final uri = Uri.parse('tel:${c.phoneNumber}');
+                        if (await canLaunchUrl(uri)) await launchUrl(uri);
+                      },
+                      icon: const Icon(Icons.phone_in_talk_rounded),
+                      tooltip: 'Call',
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showBloodBankDetailSheet(BloodBankInfo b) {
+    final dist = _currentPosition == null
+        ? null
+        : Geolocator.distanceBetween(_currentPosition!.latitude, _currentPosition!.longitude, b.lat, b.lng);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          margin: const EdgeInsets.fromLTRB(14, 0, 14, 18),
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+          decoration: BoxDecoration(
+            color: AppColors.surface.withValues(alpha: 0.94),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.bloodtype_rounded, color: const Color(0xFFE53935)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(b.name, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text('Blood Bank', style: TextStyle(color: const Color(0xFFE53935).withValues(alpha: 0.85), fontSize: 11, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 8),
+              Text(b.address, style: const TextStyle(color: Colors.white60, fontSize: 13)),
+              if (dist != null) ...[
+                const SizedBox(height: 6),
+                Text('${(dist / 1000).toStringAsFixed(1)} km away', style: const TextStyle(color: AppColors.primaryInfo, fontWeight: FontWeight.w700, fontSize: 12)),
+              ],
+              const SizedBox(height: 12),
+              const Text('Blood Availability', style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: b.bloodGroups.entries.map((e) {
+                  final isAvailable = e.value.toLowerCase().contains('available') || e.value.toLowerCase().contains('stock');
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isAvailable ? const Color(0xFF4CAF50).withValues(alpha: 0.3) : const Color(0xFFE53935).withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text('${e.key}: ${e.value}', style: TextStyle(fontSize: 11, color: isAvailable ? const Color(0xFF4CAF50) : const Color(0xFFE53935), fontWeight: FontWeight.bold)),
+                  );
+                }).toList(),
+              ),
+              if (b.lastUpdated != null) ...[
+                const SizedBox(height: 8),
+                Text('Updated: ${_timeAgo(DateTime.parse(b.lastUpdated!))}', style: const TextStyle(color: Colors.white38, fontSize: 10)),
+              ],
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        final uri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}');
+                        if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      },
+                      icon: const Icon(Icons.navigation_rounded, size: 20),
+                      label: const Text('Navigate'),
+                      style: FilledButton.styleFrom(backgroundColor: AppColors.primaryInfo, foregroundColor: Colors.white),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  IconButton.filledTonal(
+                    onPressed: () async {
+                      final uri = Uri.parse('tel:${b.phoneNumber}');
+                      if (await canLaunchUrl(uri)) await launchUrl(uri);
+                    },
+                    icon: const Icon(Icons.phone_in_talk_rounded),
+                    tooltip: 'Call',
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   String _markerSnippet(EmergencyPlace p, String layerKind, double distM) {
     final km = (distM / 1000).toStringAsFixed(1);
     final spec = p.specializationForLayer(layerKind);
@@ -826,6 +1153,67 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
     }
   }
 
+  Future<void> _loadEmergencyServicesData() async {
+    final fallback = IndiaOpsZones.lucknow.center;
+    final pos = _currentPosition;
+    final lat = pos?.latitude ?? fallback.latitude;
+    final lng = pos?.longitude ?? fallback.longitude;
+    final radiusKm = _emergencyRadius / 1000;
+
+    final pharmacies = EmergencyServicesService.getNearbyPharmacies(
+      lat, lng, radiusKm,
+    );
+    final coolingCenters = EmergencyServicesService.getNearbyCoolingCenters(
+      lat, lng, radiusKm,
+    );
+    final bloodBanks = EmergencyServicesService.getNearbyBloodBanks(
+      lat, lng, radiusKm,
+    );
+    List<DiseaseOutbreak> outbreaks = [];
+    try {
+      var country = 'IN';
+      try {
+        final marks = await placemarkFromCoordinates(lat, lng);
+        final iso = marks.isNotEmpty ? marks.first.isoCountryCode : null;
+        if (iso != null && iso.length == 2) {
+          country = iso.toUpperCase();
+        }
+      } catch (_) {}
+      outbreaks = await RegionalHealthAlertsService.fetchForLocation(
+        lat: lat,
+        lng: lng,
+        countryCodeIso2: country,
+      );
+    } catch (e) {
+      debugPrint('[MapScreen] regional health alerts: $e');
+    }
+    if (outbreaks.isEmpty) {
+      outbreaks = EmergencyServicesService.getActiveOutbreaks();
+    }
+
+    AQIInfo? aqi;
+    try {
+      final hex = await EnvironmentalDataService.fetchForLocation(
+        LatLng(lat, lng),
+      );
+      if (hex != null) {
+        aqi = EnvironmentalDataService.toAqiInfo(hex);
+      }
+    } catch (e) {
+      debugPrint('[MapScreen] Google AQI: $e');
+    }
+    aqi ??= await EmergencyServicesService.getAQI(lat, lng);
+
+    if (!mounted) return;
+    setState(() {
+      _pharmacies = pharmacies;
+      _coolingCenters = coolingCenters;
+      _bloodBanks = bloodBanks;
+      _outbreaks = outbreaks;
+      _aqiInfo = aqi;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -952,6 +1340,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
         children: [
           EosHybridMap(
             mapType: MapType.normal,
+            ignoreRemoteLeafletTiles: false,
             forceGoogleTiles: !widget.isDrillShell,
             mapId: AppConstants.googleMapsDarkMapId.isNotEmpty
                 ? AppConstants.googleMapsDarkMapId
@@ -1093,8 +1482,18 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
                         child: Container(height: 1, color: Colors.white24),
                       ),
                     if (!_mapShowZoneClassification) ...[
-                      if (_mapShowEmergencyServices && _hospitals.isNotEmpty)
-                        _legendRow(const Color(0xFFFF1744), l10n.mapLegendHospital, _nearestDistLabel(_hospitals)),
+                      if (_mapShowEmergencyServices)
+                        _legendRow(
+                          const Color(0xFFFF1744),
+                          l10n.mapLegendHospital,
+                          _hospitalsForMapMarkers().isEmpty ? '' : _nearestDistLabel(_hospitalsForMapMarkers()),
+                        ),
+                      if (_mapShowPharmacies && _pharmacies.isNotEmpty)
+                        _legendRow(const Color(0xFF26A69A), 'Pharmacy', '${_pharmacies.length} found'),
+                      if (_mapShowCoolingCenters && _coolingCenters.isNotEmpty)
+                        _legendRow(const Color(0xFF42A5F5), 'Cooling Centers', '${_coolingCenters.length} available'),
+                      if (_mapShowBloodBanks && _bloodBanks.isNotEmpty)
+                        _legendRow(const Color(0xFFE53935), 'Blood Banks', '${_bloodBanks.length} nearby'),
                     ],
                     if ((widget.isDrillShell && _mapShowPastIncidents && _pastIncidents.isNotEmpty) ||
                         (!widget.isDrillShell && _showPastIncidentsForZone && _pastIncidentsInUserHex().isNotEmpty)) ...[
@@ -1122,8 +1521,8 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
                         padding: const EdgeInsets.only(top: 6),
                         child: _legendRow(
                           AppColors.primarySafe,
-                          l10n.mapLegendResponderScene,
                           l10n.mapResponderRoutes(_volunteerResponderPolylines.length),
+                          '',
                         ),
                       ),
                   ],
@@ -1131,7 +1530,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
               ),
             ),
 
-          // Bottom bar: Nearest (left) + layer toggles (right, semi-transparent panel).
+          // Bottom bar: Info (left) + layer toggles (right, semi-transparent panel).
           if (!_isScanning)
             Positioned(
               left: 8,
@@ -1143,41 +1542,68 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  if (_currentPosition != null)
-                    Tooltip(
-                      message: _mapNearestOnly
-                          ? 'Showing nearest facility per type. Tap to show all in range.'
-                          : 'Tap to show only the nearest hospital in range.',
-                      child: Material(
-                        color: _mapNearestOnly
-                            ? const Color(0xFF26A69A).withValues(alpha: 0.95)
-                            : Colors.black.withValues(alpha: 0.78),
+                  Tooltip(
+                    message: 'View AQI and Health Alerts',
+                    child: Material(
+                      color: Colors.black.withValues(alpha: 0.78),
+                      borderRadius: BorderRadius.circular(14),
+                      elevation: 6,
+                      child: InkWell(
+                        onTap: () => unawaited(_showInfoPanel()),
                         borderRadius: BorderRadius.circular(14),
-                        elevation: 6,
-                        child: InkWell(
-                          onTap: () => setState(() => _mapNearestOnly = !_mapNearestOnly),
-                          borderRadius: BorderRadius.circular(14),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.place_rounded,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.info_outline_rounded,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Info',
+                                style: TextStyle(
                                   color: Colors.white,
-                                  size: 20,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12,
+                                  letterSpacing: 0.3,
                                 ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Nearest',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 12,
-                                    letterSpacing: 0.3,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_mapShowPharmacies && _pharmacies.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: Tooltip(
+                        message: 'Filter pharmacies by medicine type',
+                        child: Material(
+                          color: _pharmacyMedicineFilter.isNotEmpty
+                              ? const Color(0xFF26A69A).withValues(alpha: 0.95)
+                              : Colors.black.withValues(alpha: 0.78),
+                          borderRadius: BorderRadius.circular(14),
+                          elevation: 6,
+                          child: InkWell(
+                            onTap: _showPharmacyFilterDialog,
+                            borderRadius: BorderRadius.circular(14),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.filter_list_rounded, color: Colors.white, size: 20),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    _pharmacyMedicineFilter.isEmpty ? 'Filter' : _pharmacyMedicineFilter,
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 0.3),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -1248,6 +1674,42 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
                                 controlAffinity: ListTileControlAffinity.leading,
                               ),
                             ],
+                            CheckboxListTile(
+                              dense: true,
+                              visualDensity: VisualDensity.compact,
+                              contentPadding: EdgeInsets.zero,
+                              tileColor: Colors.transparent,
+                              title: const Text('24hr Pharmacy', style: _mapFilterCheckboxTitleStyle),
+                              secondary: Icon(Icons.local_pharmacy_rounded, size: 18, color: const Color(0xFF26A69A).withValues(alpha: _mapShowPharmacies ? 1 : 0.5)),
+                              value: _mapShowPharmacies,
+                              onChanged: (v) => setState(() => _mapShowPharmacies = v ?? false),
+                              activeColor: const Color(0xFF26A69A),
+                              controlAffinity: ListTileControlAffinity.leading,
+                            ),
+                            CheckboxListTile(
+                              dense: true,
+                              visualDensity: VisualDensity.compact,
+                              contentPadding: EdgeInsets.zero,
+                              tileColor: Colors.transparent,
+                              title: const Text('Cooling Centers', style: _mapFilterCheckboxTitleStyle),
+                              secondary: Icon(Icons.ac_unit_rounded, size: 18, color: const Color(0xFF42A5F5).withValues(alpha: _mapShowCoolingCenters ? 1 : 0.5)),
+                              value: _mapShowCoolingCenters,
+                              onChanged: (v) => setState(() => _mapShowCoolingCenters = v ?? false),
+                              activeColor: const Color(0xFF42A5F5),
+                              controlAffinity: ListTileControlAffinity.leading,
+                            ),
+                            CheckboxListTile(
+                              dense: true,
+                              visualDensity: VisualDensity.compact,
+                              contentPadding: EdgeInsets.zero,
+                              tileColor: Colors.transparent,
+                              title: const Text('Blood Banks', style: _mapFilterCheckboxTitleStyle),
+                              secondary: Icon(Icons.bloodtype_rounded, size: 18, color: const Color(0xFFE53935).withValues(alpha: _mapShowBloodBanks ? 1 : 0.5)),
+                              value: _mapShowBloodBanks,
+                              onChanged: (v) => setState(() => _mapShowBloodBanks = v ?? false),
+                              activeColor: const Color(0xFFE53935),
+                              controlAffinity: ListTileControlAffinity.leading,
+                            ),
                           ],
                         ),
                       ),
@@ -1955,6 +2417,69 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
       );
     }));
 
+    if (_mapShowPharmacies) {
+      for (var pi = 0; pi < _pharmacies.length; pi++) {
+        final p = _pharmacies[pi];
+        final dist = Geolocator.distanceBetween(lat, lng, p.lat, p.lng);
+        final distLabel = dist >= 1000
+            ? '${(dist / 1000).toStringAsFixed(1)} km'
+            : '${dist.round()} m';
+        markers.add(Marker(
+          markerId: MarkerId('pharmacy_$pi'),
+          position: LatLng(p.lat, p.lng),
+          icon: _pharmacyIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          infoWindow: InfoWindow(
+            title: '${p.name}${p.is24Hours ? " (24hr)" : ""}',
+            snippet: '${p.medicineFilterSummary} · $distLabel',
+          ),
+          onTap: () => _showPharmacyDetailSheet(p),
+        ));
+      }
+    }
+
+    if (_mapShowCoolingCenters) {
+      for (var ci = 0; ci < _coolingCenters.length; ci++) {
+        final c = _coolingCenters[ci];
+        final dist = Geolocator.distanceBetween(lat, lng, c.lat, c.lng);
+        final distLabel = dist >= 1000
+            ? '${(dist / 1000).toStringAsFixed(1)} km'
+            : '${dist.round()} m';
+        final facilities = <String>[];
+        if (c.hasORS) facilities.add('ORS');
+        if (c.hasMedicalSupport) facilities.add('Medical');
+        markers.add(Marker(
+          markerId: MarkerId('cooling_$ci'),
+          position: LatLng(c.lat, c.lng),
+          icon: _coolingCenterIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          infoWindow: InfoWindow(
+            title: c.name,
+            snippet: '${facilities.isEmpty ? "Cool shelter" : facilities.join(" + ")} · $distLabel',
+          ),
+          onTap: () => _showCoolingCenterDetailSheet(c),
+        ));
+      }
+    }
+
+    if (_mapShowBloodBanks) {
+      for (var bi = 0; bi < _bloodBanks.length; bi++) {
+        final b = _bloodBanks[bi];
+        final dist = Geolocator.distanceBetween(lat, lng, b.lat, b.lng);
+        final distLabel = dist >= 1000
+            ? '${(dist / 1000).toStringAsFixed(1)} km'
+            : '${dist.round()} m';
+        markers.add(Marker(
+          markerId: MarkerId('bloodbank_$bi'),
+          position: LatLng(b.lat, b.lng),
+          icon: _bloodBankIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          infoWindow: InfoWindow(
+            title: b.name,
+            snippet: 'Blood available · $distLabel',
+          ),
+          onTap: () => _showBloodBankDetailSheet(b),
+        ));
+      }
+    }
+
     return markers;
   }
 
@@ -2095,6 +2620,366 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
     );
   }
 
+  Widget _buildAQIInfoPanel() {
+    final aqi = _aqiInfo!;
+    Color aqiColor;
+    if (aqi.aqi <= 50) {
+      aqiColor = const Color(0xFF4CAF50);
+    } else if (aqi.aqi <= 100) {
+      aqiColor = const Color(0xFFFFEB3B);
+    } else if (aqi.aqi <= 150) {
+      aqiColor = const Color(0xFFFF9800);
+    } else if (aqi.aqi <= 200) {
+      aqiColor = const Color(0xFFE53935);
+    } else {
+      aqiColor = const Color(0xFF9C27B0);
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: aqiColor.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.air_rounded, color: aqiColor, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'AQI: ${aqi.aqi.round()}',
+                style: TextStyle(color: aqiColor, fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(color: aqiColor.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(4)),
+                child: Text(aqi.category, style: TextStyle(color: aqiColor, fontSize: 11, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            aqi.personalizedImpact,
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Icon(Icons.masks_rounded, size: 14, color: Colors.white54),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(aqi.maskAdvisory, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+              ),
+            ],
+          ),
+          if (aqi.sensitiveGroups.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 4,
+              children: aqi.sensitiveGroups.map((g) => Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(4)),
+                child: Text(g, style: const TextStyle(color: Colors.white54, fontSize: 9)),
+              )).toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOutbreakAlertPanel() {
+    final criticalOutbreaks = _outbreaks.where((o) => o.isCritical).toList();
+    final otherOutbreaks = _outbreaks.where((o) => !o.isCritical).toList();
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFF9800).withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.warning_rounded, color: const Color(0xFFFF9800), size: 20),
+              const SizedBox(width: 8),
+              const Text('Disease Outbreak Alerts', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...criticalOutbreaks.take(2).map((outbreak) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE53935).withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFE53935).withValues(alpha: 0.4)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(color: const Color(0xFFE53935), borderRadius: BorderRadius.circular(4)),
+                        child: Text(outbreak.advisoryLevel ?? 'Alert', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(outbreak.disease, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(outbreak.description, style: const TextStyle(color: Colors.white70, fontSize: 10), maxLines: 2, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 4),
+                  if (outbreak.precautions.isNotEmpty)
+                    Text('• ${outbreak.precautions.first}', style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                ],
+              ),
+            ),
+          )),
+          if (otherOutbreaks.isNotEmpty) ...[
+            const Divider(color: Colors.white24),
+            Text('Other Alerts', style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            ...otherOutbreaks.take(2).map((o) => Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 12, color: Colors.orange.shade300),
+                  const SizedBox(width: 4),
+                  Text('${o.disease} - ${o.affectedArea}', style: const TextStyle(color: Colors.white60, fontSize: 10)),
+                ],
+              ),
+            )),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showInfoPanel() async {
+    await _loadEmergencyServicesData();
+    if (!mounted) return;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Container(
+          margin: const EdgeInsets.fromLTRB(14, 0, 14, 18),
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+          decoration: BoxDecoration(
+            color: AppColors.surface.withValues(alpha: 0.96),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.info_rounded, color: Colors.white),
+                    const SizedBox(width: 10),
+                    const Text('Health & Environment Info', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                if (_aqiInfo != null) ...[
+                  _buildAQISection(),
+                  const SizedBox(height: 16),
+                ],
+                if (_outbreaks.isNotEmpty) ...[
+                  _buildOutbreakSection(),
+                ],
+                if (_aqiInfo == null && _outbreaks.isEmpty) ...[
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.cloud_off_rounded, color: Colors.white54),
+                        SizedBox(width: 12),
+                        Expanded(child: Text('No health alerts in your area', style: TextStyle(color: Colors.white70))),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: FilledButton.styleFrom(backgroundColor: AppColors.primaryInfo),
+                    child: const Text('Close'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAQISection() {
+    final aqi = _aqiInfo!;
+    Color aqiColor;
+    String aqiLabel;
+    if (aqi.aqi <= 50) {
+      aqiColor = const Color(0xFF4CAF50);
+      aqiLabel = 'Good';
+    } else if (aqi.aqi <= 100) {
+      aqiColor = const Color(0xFFFFEB3B);
+      aqiLabel = 'Moderate';
+    } else if (aqi.aqi <= 150) {
+      aqiColor = const Color(0xFFFF9800);
+      aqiLabel = 'Unhealthy for Sensitive';
+    } else if (aqi.aqi <= 200) {
+      aqiColor = const Color(0xFFE53935);
+      aqiLabel = 'Unhealthy';
+    } else {
+      aqiColor = const Color(0xFF9C27B0);
+      aqiLabel = 'Very Unhealthy';
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: aqiColor.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: aqiColor.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.air_rounded, color: aqiColor, size: 24),
+              const SizedBox(width: 8),
+              Text('AQI: ${aqi.aqi.round()}', style: TextStyle(color: aqiColor, fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(color: aqiColor, borderRadius: BorderRadius.circular(8)),
+                child: Text(aqiLabel, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(aqi.personalizedImpact, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Icon(Icons.masks_rounded, size: 16, color: Colors.white54),
+              const SizedBox(width: 6),
+              Expanded(child: Text(aqi.maskAdvisory, style: const TextStyle(color: Colors.white54, fontSize: 11))),
+            ],
+          ),
+          if (aqi.sensitiveGroups.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: aqi.sensitiveGroups.map((g) => Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(4)),
+                child: Text(g, style: const TextStyle(color: Colors.white70, fontSize: 10)),
+              )).toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOutbreakSection() {
+    final criticalOutbreaks = _outbreaks.where((o) => o.isCritical).toList();
+    final otherOutbreaks = _outbreaks.where((o) => !o.isCritical).toList();
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.warning_rounded, color: const Color(0xFFFF9800), size: 24),
+              const SizedBox(width: 8),
+              Text('Disease Alerts (${_outbreaks.length})', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...criticalOutbreaks.take(2).map((outbreak) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE53935).withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFE53935).withValues(alpha: 0.4)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(color: const Color(0xFFE53935), borderRadius: BorderRadius.circular(4)),
+                        child: Text(outbreak.advisoryLevel ?? 'Alert', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(outbreak.disease, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(outbreak.description, style: const TextStyle(color: Colors.white70, fontSize: 11), maxLines: 2, overflow: TextOverflow.ellipsis),
+                  if (outbreak.precautions.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text('• ${outbreak.precautions.first}', style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                  ],
+                ],
+              ),
+            ),
+          )),
+          if (otherOutbreaks.isNotEmpty) ...[
+            const Divider(color: Colors.white24),
+            Text('Other Alerts', style: const TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            ...otherOutbreaks.take(3).map((o) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 14, color: Colors.orange.shade300),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text('${o.disease} - ${o.affectedArea}', style: const TextStyle(color: Colors.white60, fontSize: 11))),
+                ],
+              ),
+            )),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _legendRow(Color color, String label, String dist) {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -2105,6 +2990,80 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
         const SizedBox(width: 6),
         Text(dist, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w800)),
       ],
+    );
+  }
+
+  void _showPharmacyFilterDialog() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          margin: const EdgeInsets.fromLTRB(14, 0, 14, 18),
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+          decoration: BoxDecoration(
+            color: AppColors.surface.withValues(alpha: 0.96),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.filter_list_rounded, color: Color(0xFF26A69A)),
+                  SizedBox(width: 10),
+                  Text('Filter Pharmacies by Medicine', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _buildFilterChip('All', null),
+                  _buildFilterChip('ORS', 'ors'),
+                  _buildFilterChip('Insulin', 'insulin'),
+                  _buildFilterChip('Cardiac', 'cardiac'),
+                  _buildFilterChip('Antibiotics', 'antibiotic'),
+                  _buildFilterChip('Pain Relief', 'pain'),
+                ],
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildFilterChip(String label, String? filterValue) {
+    final isSelected = _pharmacyMedicineFilter == (filterValue ?? '');
+    return FilterChip(
+      label: Text(label, style: TextStyle(color: isSelected ? Colors.white : Colors.white70, fontSize: 12)),
+      selected: isSelected,
+      onSelected: (selected) {
+        Navigator.pop(context);
+        setState(() {
+          _pharmacyMedicineFilter = filterValue ?? '';
+          if (filterValue != null) {
+            _pharmacies = _pharmacies.where((p) =>
+              p.availableMedicines.any((m) => m.toLowerCase().contains(filterValue.toLowerCase()))
+            ).toList();
+          }
+        });
+      },
+      backgroundColor: Colors.white10,
+      selectedColor: const Color(0xFF26A69A),
+      checkmarkColor: Colors.white,
     );
   }
 

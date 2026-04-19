@@ -10,6 +10,7 @@ import '../../../services/incident_service.dart';
 import '../../../services/places_service.dart';
 import '../domain/admin_panel_access.dart';
 import 'widgets/command_center_map.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 /// Impact dashboard with KPIs, charts, and a mini zone map driven by sos_incidents.
 class ImpactDashboardScreen extends StatelessWidget {
@@ -24,7 +25,7 @@ class ImpactDashboardScreen extends StatelessWidget {
       backgroundColor: AppColors.slate900,
       appBar: AppBar(
         backgroundColor: AppColors.slate800,
-        title: const Text('Impact dashboard'),
+        title: Text(context.opsTr('Impact dashboard')),
         foregroundColor: Colors.white,
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -74,6 +75,7 @@ class ImpactDashboardScreen extends StatelessWidget {
             center: hexCenter,
             hospitals: const <EmergencyPlace>[],
             volunteerPositions: const <LatLng>[],
+            useMainAppHospitalDensityColors: true,
           );
 
           final pendingC =
@@ -501,11 +503,11 @@ class _PieFromMap extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (data.isEmpty) {
-      return const Center(child: Text('No data', style: TextStyle(color: Colors.white54, fontSize: 12)));
+      return Center(child: Text(context.opsTr('No data'), style: TextStyle(color: Colors.white54, fontSize: 12)));
     }
     final total = data.values.fold<int>(0, (a, b) => a + b);
     if (total == 0) {
-      return const Center(child: Text('No data', style: TextStyle(color: Colors.white54, fontSize: 12)));
+      return Center(child: Text(context.opsTr('No data'), style: TextStyle(color: Colors.white54, fontSize: 12)));
     }
     final entries = data.entries.toList();
     return PieChart(
@@ -535,7 +537,7 @@ class _LineFromSeries extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (series.isEmpty) {
-      return const Center(child: Text('No data', style: TextStyle(color: Colors.white54, fontSize: 12)));
+      return Center(child: Text(context.opsTr('No data'), style: TextStyle(color: Colors.white54, fontSize: 12)));
     }
     final maxY = series.fold<double>(0, (m, b) => b.count > m ? b.count.toDouble() : m);
     return LineChart(
@@ -596,7 +598,7 @@ class _BarFromBuckets extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (buckets.values.every((c) => c == 0)) {
-      return const Center(child: Text('No data', style: TextStyle(color: Colors.white54, fontSize: 12)));
+      return Center(child: Text(context.opsTr('No data'), style: TextStyle(color: Colors.white54, fontSize: 12)));
     }
     final labels = buckets.keys.toList();
     final maxY = buckets.values.fold<int>(0, (m, v) => v > m ? v : m).toDouble();
@@ -661,7 +663,7 @@ class _StackedStatusBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final total = buckets.values.fold<int>(0, (a, b) => a + b);
     if (total == 0) {
-      return const Center(child: Text('No data', style: TextStyle(color: Colors.white54, fontSize: 12)));
+      return Center(child: Text(context.opsTr('No data'), style: TextStyle(color: Colors.white54, fontSize: 12)));
     }
     final colors = {
       IncidentStatus.resolved: Colors.greenAccent,

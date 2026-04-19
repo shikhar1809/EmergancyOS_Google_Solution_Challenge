@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui' show FontFeature;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
@@ -15,10 +14,13 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/constants/demo_credentials.dart';
 import '../../../core/constants/google_maps_illustrative_light_style.dart';
 import '../../../core/constants/india_ops_zones.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/language_switcher_button.dart';
 import '../../../core/widgets/shared_situation_brief_card.dart';
+import '../../../core/widgets/slide_to_confirm_action.dart';
 import '../../../core/constants/station_unit_role.dart';
 import '../../../core/utils/fleet_map_icons.dart';
 import '../../../core/utils/ops_map_markers.dart';
@@ -29,7 +31,9 @@ import '../../../services/fleet_operator_auth_service.dart';
 import '../../../services/fleet_operator_session_service.dart';
 import '../../../services/fleet_unit_service.dart';
 import '../../../services/incident_service.dart';
+import '../../../services/ops_incident_hospital_assignment_service.dart';
 import '../../../services/station_unit_role_prefs.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 /// Mobile-first **unit driver** view: ambulance / EMS.
 /// Full dispatch stays in the admin command center — drivers only see incidents **allotted to them**.
@@ -61,6 +65,7 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
   Timer? _dutyHeartbeatTimer;
   Timer? _routeDebounce;
   List<LatLng> _routeToVictim = [];
+  List<LatLng> _routeToHospital = [];
   List<LatLng> _volunteerRouteToScene = [];
   String _volunteerRouteOverlaySig = '';
   Position? _lastSharePos;
@@ -75,9 +80,20 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
   /// Cached `custom_*` Fleet Management row for this call sign (coords + hospital id).
   FleetPlaceholderRow? _cachedFleetPlaceholderRow;
 
+  StreamSubscription<OpsIncidentHospitalAssignment?>? _hospitalAssignmentSub;
+  OpsIncidentHospitalAssignment? _hospitalAssignment;
+  String? _hospitalAssignmentListenId;
+  bool _withinVictimRadius = false;
+  bool _withinHospitalRadius = false;
+
   @override
   void initState() {
     super.initState();
+    // Pre-fill demo credentials for judge demo access.
+    const demoFleet = DemoCredentials.fleetId;
+    const demoGatePw = DemoCredentials.adminPassword;
+    if (demoFleet.isNotEmpty) _fleetIdCtrl.text = demoFleet;
+    if (demoGatePw.isNotEmpty) _passwordCtrl.text = demoGatePw;
     final f = widget.focusIncidentId?.trim();
     if (f != null && f.isNotEmpty) _selectedIncidentId = f;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -120,6 +136,7 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
     _routeDebounce?.cancel();
     _assignmentTickTimer?.cancel();
     _assignmentSub?.cancel();
+    _hospitalAssignmentSub?.cancel();
     _standbyMapCtl?.dispose();
     _fleetIdCtrl.dispose();
     _passwordCtrl.dispose();
@@ -144,6 +161,22 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
     if (ems != null && ems.isNotEmpty) return ems;
     _cachedFleetPlaceholderRow ??= await FleetUnitService.fleetPlaceholderRowForCallSign(fid);
     return _cachedFleetPlaceholderRow?.assignedHospitalId;
+  }
+
+  void _ensureHospitalAssignmentListener(String? incidentId) {
+    if (incidentId == null || incidentId.isEmpty) {
+      _hospitalAssignmentSub?.cancel();
+      _hospitalAssignmentSub = null;
+      _hospitalAssignmentListenId = null;
+      _hospitalAssignment = null;
+      return;
+    }
+    if (_hospitalAssignmentListenId == incidentId && _hospitalAssignmentSub != null) return;
+    _hospitalAssignmentSub?.cancel();
+    _hospitalAssignmentListenId = incidentId;
+    _hospitalAssignmentSub = OpsIncidentHospitalAssignmentService.watchForIncident(incidentId).listen((a) {
+      if (mounted) setState(() => _hospitalAssignment = a);
+    });
   }
 
   bool _isAllotted(SosIncident e, String? uid, StationUnitRole role) {
@@ -201,7 +234,7 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
     if (id.isEmpty || pw.isEmpty) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Enter fleet ID and password.')),
+          SnackBar(content: Text(context.opsTr('Enter fleet ID and password.'))),
         );
       }
       return;
@@ -240,7 +273,7 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
     if (r == null) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Confirm medical or crane duty to continue.')),
+          SnackBar(content: Text(context.opsTr('Confirm medical or crane duty to continue.'))),
         );
       }
       return;
@@ -358,7 +391,7 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('This assignment has expired (3 min). Marked as driver did not respond.'),
+            content: Text(context.opsTr('This assignment has expired (3 min). Marked as driver did not respond.')),
             backgroundColor: Colors.orange.shade900,
           ),
         );
@@ -432,8 +465,8 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
       );
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Assignment rejected — status: driver unavailable'),
+          SnackBar(
+            content: Text(context.opsTr('Assignment rejected — status: driver unavailable')),
             backgroundColor: Colors.orange,
           ),
         );
@@ -450,6 +483,7 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
 
   Future<void> _endDutySession() async {
     _stopAssignmentListener();
+    _ensureHospitalAssignmentListener(null);
     _stopDutyHeartbeat();
     _locTimer?.cancel();
     _locTimer = null;
@@ -463,12 +497,16 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
       _pendingRole = null;
       _selectedIncidentId = null;
       _routeToVictim = [];
+      _routeToHospital = [];
+      _withinVictimRadius = false;
+      _withinHospitalRadius = false;
       _phase = _OperatorPhase.dutyPrep;
     });
   }
 
   Future<void> _signOutFleetGate() async {
     _stopAssignmentListener();
+    _ensureHospitalAssignmentListener(null);
     _stopDutyHeartbeat();
     _locTimer?.cancel();
     _locTimer = null;
@@ -489,6 +527,65 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
   void _stopDutyHeartbeat() {
     _dutyHeartbeatTimer?.cancel();
     _dutyHeartbeatTimer = null;
+  }
+
+  Future<void> _applyEmsProximityForSelectedIncident(Position pos, {double? headingDeg}) async {
+    final selId = _selectedIncidentId?.trim();
+    if (selId == null || selId.isEmpty) return;
+    final uid = _uid;
+    final role = _role;
+    if (uid == null || role == null || role != StationUnitRole.medical) return;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('sos_incidents').doc(selId).get();
+      if (!doc.exists || !mounted) return;
+      final inc = SosIncident.fromFirestore(doc);
+      if (!_isAllotted(inc, uid, role)) return;
+      final victim = inc.liveVictimPin;
+      final phase = (inc.emsWorkflowPhase ?? '').trim();
+      if (phase == 'returning') {
+        await IncidentService.emsPushUnitLocationWithReturnProximity(
+          incidentId: selId,
+          unitLat: pos.latitude,
+          unitLng: pos.longitude,
+          victimLat: victim.latitude,
+          victimLng: victim.longitude,
+          headingDeg: headingDeg,
+        );
+      } else {
+        await IncidentService.emsPushUnitLocationWithProximity(
+          incidentId: selId,
+          unitLat: pos.latitude,
+          unitLng: pos.longitude,
+          victimLat: victim.latitude,
+          victimLng: victim.longitude,
+          headingDeg: headingDeg,
+        );
+      }
+      final distVictimM = Geolocator.distanceBetween(
+        pos.latitude,
+        pos.longitude,
+        victim.latitude,
+        victim.longitude,
+      );
+      var withinV = distVictimM <= 200;
+      var withinH = false;
+      if (phase == 'returning') {
+        final hLat = inc.returnHospitalLat ?? _hospitalAssignment?.acceptedHospitalLat;
+        final hLng = inc.returnHospitalLng ?? _hospitalAssignment?.acceptedHospitalLng;
+        if (hLat != null && hLng != null) {
+          withinH = Geolocator.distanceBetween(pos.latitude, pos.longitude, hLat, hLng) <= 200;
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _withinVictimRadius = withinV;
+          _withinHospitalRadius = withinH;
+        });
+      }
+      _scheduleRoute(inc, pos.latitude, pos.longitude);
+    } catch (e) {
+      debugPrint('[DriverPanel] duty EMS proximity: $e');
+    }
   }
 
   Future<void> _dutyHeartbeatTick() async {
@@ -549,6 +646,9 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
         stationedHospitalId: hid,
         assignedHospitalId: hid,
       );
+      if (pos != null && role == StationUnitRole.medical) {
+        await _applyEmsProximityForSelectedIncident(pos, headingDeg: headingDeg);
+      }
       if (mounted) setState(() {});
     } catch (e) {
       debugPrint('[DriverPanel] duty heartbeat: $e');
@@ -585,12 +685,121 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
 
   void _scheduleRoute(SosIncident inc, double fromLat, double fromLng) {
     _routeDebounce?.cancel();
-    final v = inc.liveVictimPin;
+    final phase = (inc.emsWorkflowPhase ?? '').trim();
+    late LatLng dest;
+    if (phase == 'returning') {
+      final lat = inc.returnHospitalLat ?? _hospitalAssignment?.acceptedHospitalLat;
+      final lng = inc.returnHospitalLng ?? _hospitalAssignment?.acceptedHospitalLng;
+      if (lat == null || lng == null) {
+        if (context.mounted) {
+          setState(() {
+            _routeToVictim = [];
+            _routeToHospital = [];
+          });
+        }
+        return;
+      }
+      dest = LatLng(lat, lng);
+    } else {
+      dest = inc.liveVictimPin;
+    }
     _routeDebounce = Timer(const Duration(milliseconds: 600), () async {
-      final pts = await OsrmRouteUtil.drivingRoute(LatLng(fromLat, fromLng), v);
+      final pts = await OsrmRouteUtil.drivingRoute(LatLng(fromLat, fromLng), dest);
       if (!context.mounted) return;
-      setState(() => _routeToVictim = pts);
+      if (phase == 'returning') {
+        setState(() {
+          _routeToHospital = pts;
+          _routeToVictim = [];
+        });
+      } else {
+        setState(() {
+          _routeToVictim = pts;
+          _routeToHospital = [];
+        });
+      }
     });
+  }
+
+  Future<void> _onSlideOnSceneConfirm(SosIncident inc) async {
+    await IncidentService.markEmsOnScene(incidentId: inc.id);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.opsTr('On scene confirmed'))),
+    );
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _onSlideRescueComplete(SosIncident inc) async {
+    final hid = _hospitalAssignment?.acceptedHospitalId?.trim();
+    final lat = _hospitalAssignment?.acceptedHospitalLat;
+    final lng = _hospitalAssignment?.acceptedHospitalLng;
+    if (hid == null || hid.isEmpty || lat == null || lng == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.opsTr('Accepting hospital coordinates not available yet.'))),
+        );
+      }
+      return;
+    }
+    await IncidentService.markEmsRescueComplete(
+      incidentId: inc.id,
+      returnHospitalId: hid,
+      returnHospitalLat: lat,
+      returnHospitalLng: lng,
+    );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.opsTr('Rescue complete — route to accepting hospital'))),
+    );
+    final pos = _lastSharePos;
+    if (pos != null) {
+      final doc = await FirebaseFirestore.instance.collection('sos_incidents').doc(inc.id).get();
+      if (doc.exists && context.mounted) {
+        final fresh = SosIncident.fromFirestore(doc);
+        _scheduleRoute(fresh, pos.latitude, pos.longitude);
+        final hLat = fresh.returnHospitalLat ?? lat;
+        final hLng = fresh.returnHospitalLng ?? lng;
+        _mapCtl?.animateCamera(
+          CameraUpdate.newLatLngBounds(
+            LatLngBounds(
+              southwest: LatLng(
+                math.min(pos.latitude, hLat) - 0.01,
+                math.min(pos.longitude, hLng) - 0.01,
+              ),
+              northeast: LatLng(
+                math.max(pos.latitude, hLat) + 0.01,
+                math.max(pos.longitude, hLng) + 0.01,
+              ),
+            ),
+            40,
+          ),
+        );
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _onSlideResponseComplete(SosIncident inc) async {
+    await IncidentService.markEmsResponseComplete(incidentId: inc.id);
+    if (!context.mounted) return;
+    final cycle = DateTime.now().difference(inc.timestamp);
+    final m = cycle.inMinutes;
+    final s = cycle.inSeconds % 60;
+    _stopLiveShare();
+    _ensureHospitalAssignmentListener(null);
+    setState(() {
+      _selectedIncidentId = null;
+      _routeToVictim = [];
+      _routeToHospital = [];
+      _withinVictimRadius = false;
+      _withinHospitalRadius = false;
+    });
+    if (FleetOperatorSession.isOnDuty) _startDutyHeartbeat();
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Response cycle complete · ${m}m ${s}s total')),
+      );
+    }
   }
 
   Future<void> _startLiveShare(SosIncident inc, StationUnitRole role) async {
@@ -601,7 +810,7 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
     if (p == LocationPermission.deniedForever || p == LocationPermission.denied) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Turn on location to share your unit position.')),
+          SnackBar(content: Text(context.opsTr('Turn on location to share your unit position.'))),
         );
       }
       return;
@@ -610,6 +819,8 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
     final fleetHospitalId = await _hospitalIdForFleetSync();
 
     _lastSharePos = null;
+    _withinVictimRadius = false;
+    _withinHospitalRadius = false;
     _locTimer?.cancel();
     _locTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
       if (!context.mounted || _selectedIncidentId != inc.id) return;
@@ -617,9 +828,31 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
         final pos = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
         );
-        final victim = inc.liveVictimPin;
+        final doc = await FirebaseFirestore.instance.collection('sos_incidents').doc(inc.id).get();
+        if (!doc.exists || !context.mounted) return;
+        final fresh = SosIncident.fromFirestore(doc);
+        final victim = fresh.liveVictimPin;
+        final phase = (fresh.emsWorkflowPhase ?? '').trim();
         final heading = _lastSharePos == null ? null : _bearingDegFromPositions(_lastSharePos!, pos);
         _lastSharePos = pos;
+
+        final distVictimM = Geolocator.distanceBetween(
+          pos.latitude,
+          pos.longitude,
+          victim.latitude,
+          victim.longitude,
+        );
+        var withinV = distVictimM <= 200;
+        var withinH = false;
+        if (phase == 'returning') {
+          final hLat = fresh.returnHospitalLat ?? _hospitalAssignment?.acceptedHospitalLat;
+          final hLng = fresh.returnHospitalLng ?? _hospitalAssignment?.acceptedHospitalLng;
+          if (hLat != null && hLng != null) {
+            final distH = Geolocator.distanceBetween(pos.latitude, pos.longitude, hLat, hLng);
+            withinH = distH <= 200;
+          }
+        }
+
         await FleetUnitService.syncMyUnit(
           vehicleType: role.fleetVehicleType,
           lat: pos.latitude,
@@ -633,14 +866,25 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
         );
         switch (role) {
           case StationUnitRole.medical:
-            await IncidentService.emsPushUnitLocationWithProximity(
-              incidentId: inc.id,
-              unitLat: pos.latitude,
-              unitLng: pos.longitude,
-              victimLat: victim.latitude,
-              victimLng: victim.longitude,
-              headingDeg: heading,
-            );
+            if (phase == 'returning') {
+              await IncidentService.emsPushUnitLocationWithReturnProximity(
+                incidentId: inc.id,
+                unitLat: pos.latitude,
+                unitLng: pos.longitude,
+                victimLat: victim.latitude,
+                victimLng: victim.longitude,
+                headingDeg: heading,
+              );
+            } else {
+              await IncidentService.emsPushUnitLocationWithProximity(
+                incidentId: inc.id,
+                unitLat: pos.latitude,
+                unitLng: pos.longitude,
+                victimLat: victim.latitude,
+                victimLng: victim.longitude,
+                headingDeg: heading,
+              );
+            }
           case StationUnitRole.crane:
             await IncidentService.pushCraneLiveLocation(
               inc.id,
@@ -649,30 +893,58 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
               headingDeg: heading,
             );
         }
-        if (context.mounted) setState(() {});
-        _scheduleRoute(inc, pos.latitude, pos.longitude);
-        _mapCtl?.animateCamera(
-          CameraUpdate.newLatLngBounds(
-            LatLngBounds(
-              southwest: LatLng(
-                math.min(victim.latitude, pos.latitude) - 0.01,
-                math.min(victim.longitude, pos.longitude) - 0.01,
+        if (context.mounted) {
+          setState(() {
+            _withinVictimRadius = withinV;
+            _withinHospitalRadius = withinH;
+          });
+        }
+        _scheduleRoute(fresh, pos.latitude, pos.longitude);
+
+        if (phase == 'returning') {
+          final hLat = fresh.returnHospitalLat ?? _hospitalAssignment?.acceptedHospitalLat;
+          final hLng = fresh.returnHospitalLng ?? _hospitalAssignment?.acceptedHospitalLng;
+          if (hLat != null && hLng != null) {
+            _mapCtl?.animateCamera(
+              CameraUpdate.newLatLngBounds(
+                LatLngBounds(
+                  southwest: LatLng(
+                    math.min(pos.latitude, hLat) - 0.01,
+                    math.min(pos.longitude, hLng) - 0.01,
+                  ),
+                  northeast: LatLng(
+                    math.max(pos.latitude, hLat) + 0.01,
+                    math.max(pos.longitude, hLng) + 0.01,
+                  ),
+                ),
+                40,
               ),
-              northeast: LatLng(
-                math.max(victim.latitude, pos.latitude) + 0.01,
-                math.max(victim.longitude, pos.longitude) + 0.01,
+            );
+          }
+        } else {
+          _mapCtl?.animateCamera(
+            CameraUpdate.newLatLngBounds(
+              LatLngBounds(
+                southwest: LatLng(
+                  math.min(victim.latitude, pos.latitude) - 0.01,
+                  math.min(victim.longitude, pos.longitude) - 0.01,
+                ),
+                northeast: LatLng(
+                  math.max(victim.latitude, pos.latitude) + 0.01,
+                  math.max(victim.longitude, pos.longitude) + 0.01,
+                ),
               ),
+              40,
             ),
-            40,
-          ),
-        );
+          );
+        }
       } catch (e) {
         debugPrint('[DriverPanel] location tick: $e');
       }
     });
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Live location sharing on (every 5s) · fleet map')),
+        SnackBar(content: Text(context.opsTr('Live location sharing on (every 5s) · fleet map'))),
       );
     }
   }
@@ -681,8 +953,13 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
     _locTimer?.cancel();
     _locTimer = null;
     _lastSharePos = null;
+    _withinVictimRadius = false;
+    _withinHospitalRadius = false;
     unawaited(FleetUnitService.clearMyUnit());
-    setState(() => _routeToVictim = []);
+    setState(() {
+      _routeToVictim = [];
+      _routeToHospital = [];
+    });
     if (FleetOperatorSession.isOnDuty && _selectedIncidentId == null) {
       _startDutyHeartbeat();
     }
@@ -712,7 +989,8 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
         backgroundColor: const Color(0xFF0D1117),
         appBar: AppBar(
           backgroundColor: const Color(0xFF161B22),
-          title: const Text('Fleet operator gate'),
+          title: Text(context.opsTr('Fleet operator gate')),
+          actions: const [LanguageSwitcherButton()],
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () => unawaited(_signOutFleetGate()),
@@ -727,6 +1005,30 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
                 'Operations can view or reset credentials from the admin Fleet Management console.',
                 style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.45),
               ),
+              // Demo hint banner for judges
+              if (DemoCredentials.fleetId.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1F6FEB).withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF58A6FF), width: 1),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline, color: Color(0xFF58A6FF), size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '🎯 Demo: Fleet ID and password are pre-filled. Tap "Verify & continue".',
+                          style: const TextStyle(color: Color(0xFF58A6FF), fontSize: 12, height: 1.35),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 20),
               TextField(
                 controller: _fleetIdCtrl,
@@ -749,7 +1051,7 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
                 style: FilledButton.styleFrom(backgroundColor: const Color(0xFF238636), padding: const EdgeInsets.symmetric(vertical: 14)),
                 child: _gateBusy
                     ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('Verify & continue'),
+                    : Text(context.opsTr('Verify & continue')),
               ),
             ],
           ),
@@ -768,6 +1070,7 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
         appBar: AppBar(
           backgroundColor: const Color(0xFF161B22),
           title: Text('Fleet · ${FleetOperatorSession.fleetId ?? ""}'),
+          actions: const [LanguageSwitcherButton()],
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () => unawaited(_signOutFleetGate()),
@@ -801,12 +1104,12 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
-                  child: const Text('Go on duty', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  child: Text(context.opsTr('Go on duty'), style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                 ),
                 const SizedBox(height: 14),
                 TextButton(
                   onPressed: () => unawaited(_signOutFleetGate()),
-                  child: const Text('Sign out fleet ID', style: TextStyle(color: Colors.white38)),
+                  child: Text(context.opsTr('Sign out fleet ID'), style: TextStyle(color: Colors.white38)),
                 ),
               ],
             ),
@@ -817,9 +1120,9 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
 
     final role = _role;
     if (role == null) {
-      return const Scaffold(
-        backgroundColor: Color(0xFF0D1117),
-        body: Center(child: Text('Session error — reopen operator console.', style: TextStyle(color: Colors.white54))),
+      return Scaffold(
+        backgroundColor: const Color(0xFF0D1117),
+        body: Center(child: Text(context.opsTr('Session error — reopen operator console.'), style: TextStyle(color: Colors.white54))),
       );
     }
 
@@ -839,6 +1142,7 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
           ],
         ),
         actions: [
+          const LanguageSwitcherButton(),
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: FirebaseFirestore.instance.collection('sos_incidents').limit(200).snapshots(),
             builder: (context, snap) {
@@ -867,17 +1171,22 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
           ),
           TextButton(
             onPressed: () => unawaited(_endDutySession()),
-            child: const Text('End duty', style: TextStyle(color: Colors.orangeAccent, fontSize: 13)),
+            child: Text(context.opsTr('End duty'), style: TextStyle(color: Colors.orangeAccent, fontSize: 13)),
           ),
         ],
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
             if (_selectedIncidentId != null) {
+              _ensureHospitalAssignmentListener(null);
               setState(() {
                 _selectedIncidentId = null;
                 _volunteerRouteToScene = [];
                 _volunteerRouteOverlaySig = '';
+                _routeToVictim = [];
+                _routeToHospital = [];
+                _withinVictimRadius = false;
+                _withinHospitalRadius = false;
               });
               if (FleetOperatorSession.isOnDuty) _startDutyHeartbeat();
             } else {
@@ -935,11 +1244,14 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
                 }
 
                 if (selected != null) {
+                  final incidentForCb = selected;
                   WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (context.mounted) unawaited(_refreshVolunteerRouteOverlay(selected!));
+                    if (!context.mounted) return;
+                    _ensureHospitalAssignmentListener(incidentForCb.id);
+                    unawaited(_refreshVolunteerRouteOverlay(incidentForCb));
                   });
                   return _DriverDetailView(
-                    incident: selected,
+                    incident: incidentForCb,
                     queue: mine,
                     role: role,
                     fleetCallSign: FleetOperatorSession.fleetId,
@@ -951,16 +1263,26 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
                       }
                     },
                     onMapCreated: (c) => _mapCtl = c,
-                    route: _routeToVictim,
+                    routeToVictim: _routeToVictim,
+                    routeToHospital: _routeToHospital,
                     volunteerRouteToScene: _volunteerRouteToScene,
-                    unitMapOverride: _unitMapOverlayLatLng(selected),
-                    onDirections: () => _openDirections(selected!.liveVictimPin),
-                    onEmergencyLiveKit: () => _openFleetEmergencyBridge(selected!),
-                    onOperatorLiveKit: () => _openFleetOperatorComms(selected!),
-                    onStartLive: () => _startLiveShare(selected!, role),
+                    unitMapOverride: _unitMapOverlayLatLng(incidentForCb),
+                    withinVictimRadius: _withinVictimRadius,
+                    withinHospitalRadius: _withinHospitalRadius,
+                    hospitalAssignment: _hospitalAssignment,
+                    onDirections: () => _openDirections(incidentForCb.liveVictimPin),
+                    onEmergencyLiveKit: () => _openFleetEmergencyBridge(incidentForCb),
+                    onOperatorLiveKit: () => _openFleetOperatorComms(incidentForCb),
+                    onStartLive: () => _startLiveShare(incidentForCb, role),
                     onStopLive: _stopLiveShare,
                     isLive: _locTimer != null && _locTimer!.isActive,
-                    onSelectQueuedIncident: (id) => setState(() => _selectedIncidentId = id),
+                    onSlideOnSceneConfirm: () => _onSlideOnSceneConfirm(incidentForCb),
+                    onSlideRescueComplete: () => _onSlideRescueComplete(incidentForCb),
+                    onSlideResponseComplete: () => _onSlideResponseComplete(incidentForCb),
+                    onSelectQueuedIncident: (id) {
+                      _ensureHospitalAssignmentListener(id);
+                      setState(() => _selectedIncidentId = id);
+                    },
                   );
                 }
 
@@ -1250,9 +1572,7 @@ class _StandbyDispatchPanelState extends State<_StandbyDispatchPanel> with Singl
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Awaiting dispatch…',
-                            style: TextStyle(
+                          Text(context.opsTr('Awaiting dispatch…'), style: TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w800,
                               fontSize: 17,
@@ -1410,7 +1730,7 @@ class _AssignmentNotificationBanner extends StatelessWidget {
                   ),
                   onPressed: onAccept,
                   icon: const Icon(Icons.check, size: 18),
-                  label: const Text('Accept', style: TextStyle(fontWeight: FontWeight.bold)),
+                  label: Text(context.opsTr('Accept'), style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ),
               const SizedBox(width: 10),
@@ -1422,7 +1742,7 @@ class _AssignmentNotificationBanner extends StatelessWidget {
                   ),
                   onPressed: onReject,
                   icon: const Icon(Icons.close, size: 18),
-                  label: const Text('Reject', style: TextStyle(fontWeight: FontWeight.bold)),
+                  label: Text(context.opsTr('Reject'), style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ),
             ],
@@ -1473,10 +1793,10 @@ class _AssignmentList extends StatelessWidget {
   Widget build(BuildContext context) {
     final fmt = DateFormat('MMM d · HH:mm');
     if (uid == null || uid!.isEmpty) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text('Sign in to see your allotments.', style: TextStyle(color: Colors.white54)),
+          padding: const EdgeInsets.all(24),
+          child: Text(context.opsTr('Sign in to see your allotments.'), style: TextStyle(color: Colors.white54)),
         ),
       );
     }
@@ -1543,9 +1863,7 @@ class _AssignmentList extends StatelessWidget {
                           color: const Color(0xFF238636).withValues(alpha: 0.25),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Text(
-                          'Allotted to you',
-                          style: TextStyle(color: Color(0xFF79C0FF), fontSize: 10, fontWeight: FontWeight.w800),
+                        child: Text(context.opsTr('Allotted to you'), style: TextStyle(color: Color(0xFF79C0FF), fontSize: 10, fontWeight: FontWeight.w800),
                         ),
                       ),
                     ],
@@ -1677,9 +1995,7 @@ class _QueuedIncidentPagerState extends State<_QueuedIncidentPager> {
                                   color: const Color(0xFF238636).withValues(alpha: 0.35),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
-                                child: const Text(
-                                  'VIEWING',
-                                  style: TextStyle(color: Color(0xFF69F0AE), fontSize: 9, fontWeight: FontWeight.w800),
+                                child: Text(context.opsTr('VIEWING'), style: TextStyle(color: Color(0xFF69F0AE), fontSize: 9, fontWeight: FontWeight.w800),
                                 ),
                               ),
                           ],
@@ -1726,13 +2042,18 @@ class _DriverMapLayers {
   static _DriverMapLayers build({
     required SosIncident incident,
     required double fleetMapZoom,
-    required List<LatLng> route,
+    required List<LatLng> routeToVictim,
+    required List<LatLng> routeToHospital,
     required List<LatLng> volunteerRouteToScene,
     LatLng? unitPositionOverride,
+    LatLng? hospitalLatLng,
+    String? hospitalName,
   }) {
     final victim = incident.liveVictimPin;
+    final phase = (incident.emsWorkflowPhase ?? '').trim();
     final fbRed = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed);
     final fbAz = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure);
+    final fbHosp = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
     final markers = <Marker>{
       Marker(
         markerId: const MarkerId('victim'),
@@ -1742,6 +2063,21 @@ class _DriverMapLayers {
         icon: OpsMapMarkers.sceneOr(fbRed),
       ),
     };
+
+    if (hospitalLatLng != null && phase != 'complete') {
+      markers.add(
+        Marker(
+          markerId: const MarkerId('return_hospital'),
+          position: hospitalLatLng,
+          zIndexInt: 2,
+          icon: fbHosp,
+          infoWindow: InfoWindow(
+            title: (hospitalName ?? '').isNotEmpty ? hospitalName! : 'Accepting hospital',
+            snippet: phase == 'returning' ? 'Return destination' : 'Assigned receiving facility',
+          ),
+        ),
+      );
+    }
 
     final amb = incident.ambulanceLiveLocation ?? unitPositionOverride;
     if (amb != null) {
@@ -1760,13 +2096,25 @@ class _DriverMapLayers {
       );
     }
     final polylines = <Polyline>{};
-    if (route.length >= 2) {
+    final showVictimRoute = phase != 'returning' && phase != 'complete';
+    if (routeToVictim.length >= 2 && showVictimRoute) {
       polylines.add(
         Polyline(
           polylineId: const PolylineId('drv_route'),
-          points: route,
+          points: routeToVictim,
           color: const Color(0xFF58A6FF).withValues(alpha: 0.9),
           width: 5,
+        ),
+      );
+    }
+    if (routeToHospital.length >= 2 && phase == 'returning') {
+      polylines.add(
+        Polyline(
+          polylineId: const PolylineId('drv_route_hospital'),
+          points: routeToHospital,
+          color: const Color(0xFF79C0FF).withValues(alpha: 0.95),
+          width: 5,
+          zIndex: 3,
         ),
       );
     }
@@ -1807,9 +2155,7 @@ class _DriverEtaStatusStrip extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
-            'Published ETAs (victim app)',
-            style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w700),
+          Text(context.opsTr('Published ETAs (victim app)'), style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 8),
           Text(
@@ -1861,8 +2207,8 @@ class _VictimActivityList extends StatelessWidget {
         }
         final docs = snap.data!.docs;
         if (docs.isEmpty) {
-          return const Center(
-            child: Text('No activity lines yet.', style: TextStyle(color: Colors.white38, fontSize: 11)),
+          return Center(
+            child: Text(context.opsTr('No activity lines yet.'), style: TextStyle(color: Colors.white38, fontSize: 11)),
           );
         }
         return ListView.separated(
@@ -1919,29 +2265,46 @@ class _DriverMapPanel extends StatelessWidget {
     required this.layers,
     required this.onFleetCameraMove,
     required this.onMapCreated,
+    this.mapBottomOverlay,
   });
 
   final _DriverMapLayers layers;
   final ValueChanged<double> onFleetCameraMove;
   final void Function(OpsMapController) onMapCreated;
+  final Widget? mapBottomOverlay;
 
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
-      child: EosHybridMap(
-        cameraTargetBounds: IndiaOpsZones.lucknowCameraTargetBounds,
-        initialCameraPosition: IndiaOpsZones.lucknowSafeCamera(layers.victim, preferZoom: 14),
-        onCameraMove: (CameraPosition p) => onFleetCameraMove(p.zoom),
-        markers: layers.markers,
-        polylines: layers.polylines,
-        mapType: MapType.normal,
-        mapId: AppConstants.googleMapsDarkMapId.isNotEmpty ? AppConstants.googleMapsDarkMapId : null,
-        style: effectiveGoogleMapsEmbeddedStyleJson(),
-        myLocationEnabled: true,
-        myLocationButtonEnabled: true,
-        zoomControlsEnabled: false,
-        onMapCreated: onMapCreated,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          EosHybridMap(
+            cameraTargetBounds: IndiaOpsZones.lucknowCameraTargetBounds,
+            initialCameraPosition: IndiaOpsZones.lucknowSafeCamera(layers.victim, preferZoom: 14),
+            onCameraMove: (CameraPosition p) => onFleetCameraMove(p.zoom),
+            markers: layers.markers,
+            polylines: layers.polylines,
+            mapType: MapType.normal,
+            mapId: AppConstants.googleMapsDarkMapId.isNotEmpty ? AppConstants.googleMapsDarkMapId : null,
+            style: effectiveGoogleMapsEmbeddedStyleJson(),
+            myLocationEnabled: true,
+            myLocationButtonEnabled: true,
+            zoomControlsEnabled: false,
+            onMapCreated: onMapCreated,
+          ),
+          if (mapBottomOverlay != null)
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: 8,
+              child: SafeArea(
+                top: false,
+                child: mapBottomOverlay!,
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -1971,21 +2334,21 @@ class _DriverMapShareBar extends StatelessWidget {
           onPressed: onDirections,
           style: FilledButton.styleFrom(backgroundColor: const Color(0xFF238636)),
           icon: const Icon(Icons.navigation_rounded, size: 20),
-          label: const Text('Turn-by-turn'),
+          label: Text(context.opsTr('Turn-by-turn')),
         ),
         if (!isLive)
           OutlinedButton.icon(
             onPressed: onStartLive,
             style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFF58A6FF)),
             icon: const Icon(Icons.gps_fixed, size: 18),
-            label: const Text('Share unit location'),
+            label: Text(context.opsTr('Share unit location')),
           )
         else
           OutlinedButton.icon(
             onPressed: onStopLive,
             style: OutlinedButton.styleFrom(foregroundColor: Colors.orangeAccent),
             icon: const Icon(Icons.pause_circle_outline, size: 18),
-            label: const Text('Stop sharing'),
+            label: Text(context.opsTr('Stop sharing')),
           ),
       ],
     );
@@ -2079,14 +2442,10 @@ class _EmsPhysicianHandoffReport extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'EMS → physician handoff',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 18),
+        Text(context.opsTr('EMS → physician handoff'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 18),
         ),
         const SizedBox(height: 6),
-        const Text(
-          'Structured report (SBAR) for bedside sign-out — copy sections as needed.',
-          style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.35),
+        Text(context.opsTr('Structured report (SBAR) for bedside sign-out — copy sections as needed.'), style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.35),
         ),
         const SizedBox(height: 14),
         section('Situation', situation),
@@ -2099,20 +2458,60 @@ class _EmsPhysicianHandoffReport extends StatelessWidget {
 }
 
 class _DriverAllotmentStrip extends StatelessWidget {
-  const _DriverAllotmentStrip({required this.role});
+  const _DriverAllotmentStrip({required this.role, required this.incident});
 
   final StationUnitRole role;
+  final SosIncident incident;
 
   @override
   Widget build(BuildContext context) {
+    final phase = (incident.emsWorkflowPhase ?? '').trim();
+    String title;
+    String subtitle;
+    Color border;
+    Color bg;
+    if (role == StationUnitRole.medical && phase.isNotEmpty) {
+      if (phase == 'inbound') {
+        title = 'En route';
+        subtitle = 'Within ~200 m of scene → slide to confirm on scene · then rescue · then return';
+        border = const Color(0xFF58A6FF);
+        bg = const Color(0xFF58A6FF);
+      } else if (phase == 'on_scene') {
+        title = 'On scene';
+        subtitle = 'Slide rescue complete when ready to return · route opens to accepting hospital';
+        border = const Color(0xFF238636);
+        bg = const Color(0xFF238636);
+      } else if (phase == 'returning') {
+        title = 'Returning';
+        subtitle = 'Within ~200 m of hospital → slide to complete the EMS run';
+        border = const Color(0xFFD29922);
+        bg = const Color(0xFFD29922);
+      } else if (phase == 'complete') {
+        title = 'Response complete';
+        subtitle = 'Await next assignment';
+        border = const Color(0xFF8B949E);
+        bg = const Color(0xFF8B949E);
+      } else {
+        title = 'EMS · $phase';
+        subtitle = 'Allotted run';
+        border = const Color(0xFF238636);
+        bg = const Color(0xFF238636);
+      }
+    } else {
+      title = 'Allotted';
+      subtitle = 'Proceed to scene. Live victim GPS when available.';
+      border = const Color(0xFF238636);
+      bg = const Color(0xFF238636);
+    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF238636).withValues(alpha: 0.15),
+        color: bg.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF238636).withValues(alpha: 0.45)),
+        border: Border.all(color: border.withValues(alpha: 0.55)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
             role == StationUnitRole.medical ? Icons.medical_services_rounded : Icons.construction_rounded,
@@ -2121,9 +2520,24 @@ class _DriverAllotmentStrip extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              'Allotted · proceed to scene. Live victim GPS when available.',
-              style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.3),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.3),
+                ),
+              ],
             ),
           ),
         ],
@@ -2161,9 +2575,7 @@ class _DriverVictimUpdatesColumn extends StatelessWidget {
       children: [
         _DriverEtaStatusStrip(incident: incident, role: role),
         const SizedBox(height: 12),
-        const Text(
-          'Live voice (LiveKit)',
-          style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w700),
+        Text(context.opsTr('Live voice (LiveKit)'), style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 6),
         if (showEmergencyVoice)
@@ -2172,8 +2584,8 @@ class _DriverVictimUpdatesColumn extends StatelessWidget {
             child: ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.campaign_rounded, color: Color(0xFF79C0FF)),
-              title: const Text('Emergency channel', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-              subtitle: const Text('Same room as victim / on-scene responders', style: TextStyle(color: Colors.white54, fontSize: 12)),
+              title: Text(context.opsTr('Emergency channel'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+              subtitle: Text(context.opsTr('Same room as victim / on-scene responders'), style: TextStyle(color: Colors.white54, fontSize: 12)),
               trailing: const Icon(Icons.chevron_right, color: Colors.white38),
               onTap: onEmergencyLiveKit,
             ),
@@ -2184,8 +2596,8 @@ class _DriverVictimUpdatesColumn extends StatelessWidget {
             child: ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.support_agent_rounded, color: Color(0xFF79C0FF)),
-              title: const Text('Operator channel', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-              subtitle: const Text('Hospital / command operations net', style: TextStyle(color: Colors.white54, fontSize: 12)),
+              title: Text(context.opsTr('Operator channel'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+              subtitle: Text(context.opsTr('Hospital / command operations net'), style: TextStyle(color: Colors.white54, fontSize: 12)),
               trailing: const Icon(Icons.chevron_right, color: Colors.white38),
               onTap: onOperatorLiveKit,
             ),
@@ -2198,7 +2610,7 @@ class _DriverVictimUpdatesColumn extends StatelessWidget {
           showRefreshButton: true,
         ),
         const SizedBox(height: 12),
-        const Text('Victim GPS', style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w700)),
+        Text(context.opsTr('Victim GPS'), style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w700)),
         Text(
           'Pin · ${victim.latitude.toStringAsFixed(5)}, ${victim.longitude.toStringAsFixed(5)}',
           style: const TextStyle(color: Colors.white38, fontSize: 11),
@@ -2211,9 +2623,7 @@ class _DriverVictimUpdatesColumn extends StatelessWidget {
         const SizedBox(height: 8),
         Text('Triage · $triageLine', style: const TextStyle(color: Colors.white60, fontSize: 12, height: 1.35)),
         const SizedBox(height: 12),
-        const Text(
-          'Live feed (victim / dispatch)',
-          style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w700),
+        Text(context.opsTr('Live feed (victim / dispatch)'), style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 6),
         _VictimActivityList(incidentId: incident.id, shrinkWrap: true),
@@ -2262,15 +2672,22 @@ class _DriverDetailView extends StatelessWidget {
     required this.fleetMapZoom,
     required this.onFleetCameraMove,
     required this.onMapCreated,
-    required this.route,
+    required this.routeToVictim,
+    required this.routeToHospital,
     required this.volunteerRouteToScene,
     this.unitMapOverride,
+    required this.withinVictimRadius,
+    required this.withinHospitalRadius,
+    this.hospitalAssignment,
     required this.onDirections,
     required this.onEmergencyLiveKit,
     required this.onOperatorLiveKit,
     required this.onStartLive,
     required this.onStopLive,
     required this.isLive,
+    required this.onSlideOnSceneConfirm,
+    required this.onSlideRescueComplete,
+    required this.onSlideResponseComplete,
     required this.onSelectQueuedIncident,
   });
 
@@ -2282,27 +2699,73 @@ class _DriverDetailView extends StatelessWidget {
   final double fleetMapZoom;
   final ValueChanged<double> onFleetCameraMove;
   final void Function(OpsMapController) onMapCreated;
-  final List<LatLng> route;
+  final List<LatLng> routeToVictim;
+  final List<LatLng> routeToHospital;
   final List<LatLng> volunteerRouteToScene;
   /// Local GPS when Firestore has not yet received live unit position.
   final LatLng? unitMapOverride;
+  final bool withinVictimRadius;
+  final bool withinHospitalRadius;
+  final OpsIncidentHospitalAssignment? hospitalAssignment;
   final VoidCallback onDirections;
   final VoidCallback onEmergencyLiveKit;
   final VoidCallback onOperatorLiveKit;
   final VoidCallback onStartLive;
   final VoidCallback onStopLive;
   final bool isLive;
+  final Future<void> Function() onSlideOnSceneConfirm;
+  final Future<void> Function() onSlideRescueComplete;
+  final Future<void> Function() onSlideResponseComplete;
   final ValueChanged<String> onSelectQueuedIncident;
 
   @override
   Widget build(BuildContext context) {
+    final phase = (incident.emsWorkflowPhase ?? '').trim();
+    LatLng? hospitalLatLng;
+    String? hospitalName;
+    final lat = incident.returnHospitalLat ?? hospitalAssignment?.acceptedHospitalLat;
+    final lng = incident.returnHospitalLng ?? hospitalAssignment?.acceptedHospitalLng;
+    if (lat != null && lng != null && phase != 'complete') {
+      hospitalLatLng = LatLng(lat, lng);
+      hospitalName = hospitalAssignment?.acceptedHospitalName?.trim();
+    }
+
     final layers = _DriverMapLayers.build(
       incident: incident,
       fleetMapZoom: fleetMapZoom,
-      route: route,
+      routeToVictim: routeToVictim,
+      routeToHospital: routeToHospital,
       volunteerRouteToScene: volunteerRouteToScene,
       unitPositionOverride: unitMapOverride,
+      hospitalLatLng: hospitalLatLng,
+      hospitalName: hospitalName,
     );
+
+    Widget? mapOverlay;
+    if (role == StationUnitRole.medical) {
+      if (phase == 'inbound' && withinVictimRadius) {
+        mapOverlay = SlideToConfirmAction(
+          label: 'Slide to confirm on scene →',
+          idleBadge: 'ON SCENE',
+          accentColor: const Color(0xFF58A6FF),
+          onConfirm: onSlideOnSceneConfirm,
+        );
+      } else if (phase == 'on_scene') {
+        mapOverlay = SlideToConfirmAction(
+          label: 'Slide to confirm rescue complete → return to hospital',
+          idleBadge: 'RESCUE',
+          accentColor: const Color(0xFF238636),
+          onConfirm: onSlideRescueComplete,
+        );
+      } else if (phase == 'returning' && withinHospitalRadius) {
+        mapOverlay = SlideToConfirmAction(
+          label: 'Slide to complete response →',
+          idleBadge: 'COMPLETE',
+          accentColor: const Color(0xFF58A6FF),
+          onConfirm: onSlideResponseComplete,
+        );
+      }
+    }
 
     final triage = incident.triage;
     final triageLine = triage == null || triage.isEmpty
@@ -2347,7 +2810,7 @@ class _DriverDetailView extends StatelessWidget {
               ),
               const SizedBox(height: 8),
             ],
-            _DriverAllotmentStrip(role: role),
+            _DriverAllotmentStrip(role: role, incident: incident),
             const SizedBox(height: 8),
             Material(
               color: const Color(0xFF161B22),
@@ -2400,6 +2863,7 @@ class _DriverDetailView extends StatelessWidget {
                             layers: layers,
                             onFleetCameraMove: onFleetCameraMove,
                             onMapCreated: onMapCreated,
+                            mapBottomOverlay: mapOverlay,
                           ),
                         ),
                         const SizedBox(height: 10),
@@ -2446,27 +2910,4 @@ String _sceneReportExcerpt(Map<String, dynamic> r) {
   final s = r.toString();
   if (s.length <= 480) return s;
   return '${s.substring(0, 480)}…';
-}
-
-class _StatusChip extends StatelessWidget {
-  const _StatusChip({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: const Color(0xFF21262D),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white24),
-      ),
-      child: Text(
-        '$label: $value',
-        style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w600),
-      ),
-    );
-  }
 }

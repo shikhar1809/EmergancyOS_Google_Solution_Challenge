@@ -15,7 +15,6 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/fleet_unit_availability.dart';
 import '../../../../core/utils/ops_fleet_docs_dedupe.dart';
 import '../../../../core/utils/ops_map_markers.dart';
-import '../../../../services/demo_fleet_simulation.dart';
 import '../../../../services/fleet_gate_credentials_service.dart';
 import '../../../../services/fleet_unit_service.dart';
 import '../../../../services/ops_hospital_service.dart';
@@ -25,6 +24,7 @@ import 'command_center_shared_widgets.dart';
 import 'fleet_credentials_dialog.dart';
 import 'hospital_onboarding_dialog.dart';
 import 'hospital_show_credentials_dialog.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 enum _MgmtCategory { fleet, volunteers, hospitals, facility }
 
@@ -71,6 +71,11 @@ class _MasterManagementMapWorkspaceState
   bool _onboardingMapPickActive = false;
   LatLng? _onboardingPickedLatLng;
 
+  /// Hospitals: reposition GPS after initial onboarding (orange draft pin).
+  bool _editingHospitalLocation = false;
+  String? _editLocationHospitalId;
+  LatLng? _editLocationDraft;
+
   @override
   void initState() {
     super.initState();
@@ -98,9 +103,84 @@ class _MasterManagementMapWorkspaceState
 
   void _clearSelection() {
     setState(() {
+      _editingHospitalLocation = false;
+      _editLocationHospitalId = null;
+      _editLocationDraft = null;
       _selectedFleetDocId = null;
       _selectedHospitalId = null;
     });
+  }
+
+  void _cancelEditHospitalLocation() {
+    if (!_editingHospitalLocation) return;
+    setState(() {
+      _editingHospitalLocation = false;
+      _editLocationHospitalId = null;
+      _editLocationDraft = null;
+    });
+  }
+
+  void _beginEditHospitalLocation(OpsHospitalRow hosp) {
+    final lat = hosp.lat;
+    final lng = hosp.lng;
+    if (lat == null || lng == null) return;
+    if (_onboardingMapPickActive) {
+      setState(() {
+        _onboardingMapPickActive = false;
+        _onboardingPickedLatLng = null;
+      });
+    }
+    setState(() {
+      _editingHospitalLocation = true;
+      _editLocationHospitalId = hosp.id;
+      _editLocationDraft = LatLng(lat, lng);
+      _selectedHospitalId = hosp.id;
+      _selectedFleetDocId = null;
+    });
+    unawaited(_focusOn(LatLng(lat, lng)));
+  }
+
+  Future<void> _saveEditedHospitalLocation() async {
+    final hid = _editLocationHospitalId;
+    final pick = _editLocationDraft;
+    if (hid == null || pick == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.opsTr('Tap the map to mark the exact hospital location.')),
+            backgroundColor: AppColors.slate700,
+          ),
+        );
+      }
+      return;
+    }
+    try {
+      await OpsHospitalService.updateMapCoordinates(
+        id: hid,
+        lat: pick.latitude,
+        lng: pick.longitude,
+      );
+      if (!mounted) return;
+      setState(() {
+        _editingHospitalLocation = false;
+        _editLocationHospitalId = null;
+        _editLocationDraft = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.opsTr('Hospital location updated.')),
+          backgroundColor: AppColors.slate700,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${context.opsTr('Could not save location.')} $e'),
+          backgroundColor: Colors.red.shade900,
+        ),
+      );
+    }
   }
 
   void _onCategoryChanged(_MgmtCategory c) {
@@ -109,8 +189,12 @@ class _MasterManagementMapWorkspaceState
         _onboardingMapPickActive = false;
         _onboardingPickedLatLng = null;
       }
+      _editingHospitalLocation = false;
+      _editLocationHospitalId = null;
+      _editLocationDraft = null;
       _category = c;
-      _clearSelection();
+      _selectedFleetDocId = null;
+      _selectedHospitalId = null;
     });
   }
 
@@ -172,13 +256,16 @@ class _MasterManagementMapWorkspaceState
           infoWindow: InfoWindow(
             title: callSign,
             snippet: fleetUnitIsStaffedAvailable(data, d.id)
-                ? 'Available'
+                ? context.opsTr('Available')
                 : (isFleetUnitPlaceholderDoc(d.id)
-                    ? 'No operator signed in'
-                    : 'Dispatched / busy'),
+                    ? context.opsTr('No operator signed in')
+                    : context.opsTr('Dispatched / busy')),
           ),
           onTap: () {
             setState(() {
+              _editingHospitalLocation = false;
+              _editLocationHospitalId = null;
+              _editLocationDraft = null;
               _selectedFleetDocId = d.id;
               _selectedHospitalId = null;
             });
@@ -191,6 +278,9 @@ class _MasterManagementMapWorkspaceState
 
   void _appendHospitalMarkers(Set<Marker> out, BitmapDescriptor fbBlue) {
     for (final r in _hospitalRows) {
+      if (_editingHospitalLocation && _editLocationHospitalId == r.id) {
+        continue;
+      }
       final lat = r.lat;
       final lng = r.lng;
       if (lat == null || lng == null) {
@@ -207,6 +297,13 @@ class _MasterManagementMapWorkspaceState
           infoWindow: InfoWindow(title: '${r.id} · ${r.name}', snippet: r.region),
           onTap: () {
             setState(() {
+              if (_editingHospitalLocation &&
+                  _editLocationHospitalId != null &&
+                  _editLocationHospitalId != r.id) {
+                _editingHospitalLocation = false;
+                _editLocationHospitalId = null;
+                _editLocationDraft = null;
+              }
               _selectedHospitalId = r.id;
               _selectedFleetDocId = null;
             });
@@ -238,9 +335,24 @@ class _MasterManagementMapWorkspaceState
           position: p,
           zIndexInt: 20,
           icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-          infoWindow: const InfoWindow(
-            title: 'Hospital location',
-            snippet: 'Exact point — saved with onboarding',
+          infoWindow: InfoWindow(
+            title: context.opsTr('Hospital location'),
+            snippet: context.opsTr('Exact point — saved with onboarding'),
+          ),
+        ),
+      );
+    }
+    if (_editingHospitalLocation && _editLocationDraft != null) {
+      final p = _editLocationDraft!;
+      out.add(
+        Marker(
+          markerId: const MarkerId('mgmt_hospital_location_edit'),
+          position: p,
+          zIndexInt: 20,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+          infoWindow: InfoWindow(
+            title: context.opsTr('Hospital location (edit)'),
+            snippet: context.opsTr('Tap the map to move the pin, then Save.'),
           ),
         ),
       );
@@ -259,14 +371,17 @@ class _MasterManagementMapWorkspaceState
     final id = _onboardIdCtrl.text.trim().toUpperCase();
     if (id.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Enter a hospital document ID first.'),
+        SnackBar(
+          content: Text(context.opsTr('Enter a hospital document ID first.')),
           backgroundColor: AppColors.slate700,
         ),
       );
       return;
     }
     setState(() {
+      _editingHospitalLocation = false;
+      _editLocationHospitalId = null;
+      _editLocationDraft = null;
       _onboardingMapPickActive = true;
       _onboardingPickedLatLng = null;
       _selectedFleetDocId = null;
@@ -278,8 +393,8 @@ class _MasterManagementMapWorkspaceState
     final pick = _onboardingPickedLatLng;
     if (pick == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Tap the map to mark the exact hospital location.'),
+        SnackBar(
+          content: Text(context.opsTr('Tap the map to mark the exact hospital location.')),
           backgroundColor: AppColors.slate700,
         ),
       );
@@ -360,7 +475,7 @@ class _MasterManagementMapWorkspaceState
         padding: const EdgeInsets.all(12),
         children: [
           Text(
-            'Facility setup',
+            context.opsTr('Facility setup'),
             style: TextStyle(
               color: widget.accent,
               fontWeight: FontWeight.w900,
@@ -368,9 +483,7 @@ class _MasterManagementMapWorkspaceState
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
-            'Use the left column to enter a hospital document ID and open the onboarding gate. The map shows fleet and hospital pins together so you can sanity-check coverage while you onboard.',
-            style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.35),
+          Text(context.opsTr('Use the left column to enter a hospital document ID and open the onboarding gate. The map shows fleet and hospital pins together so you can sanity-check coverage while you onboard.'), style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.35),
           ),
         ],
       );
@@ -405,23 +518,23 @@ class _MasterManagementMapWorkspaceState
             ),
           ),
           const SizedBox(height: 8),
-          _kv('Type', type),
+          _kv(context.opsTr('Type'), type),
           _kv(
-            'Status',
+            context.opsTr('Status'),
             avail
-                ? 'Available'
+                ? context.opsTr('Available')
                 : (isFleetUnitPlaceholderDoc(fleetDoc.id)
-                    ? 'No operator signed in'
-                    : 'Busy / dispatched'),
+                    ? context.opsTr('No operator signed in')
+                    : context.opsTr('Busy / dispatched')),
           ),
-          if (inc.isNotEmpty) _kv('Incident', inc),
-          if (station.isNotEmpty) _kv('Stationed at', station),
+          if (inc.isNotEmpty) _kv(context.opsTr('Incident'), inc),
+          if (station.isNotEmpty) _kv(context.opsTr('Stationed at'), station),
           if (lat != null && lng != null)
             _kv(
-              'Position',
+              context.opsTr('Position'),
               '${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
             ),
-          _kv('Updated', updatedStr),
+          _kv(context.opsTr('Updated'), updatedStr),
           const SizedBox(height: 16),
           OutlinedButton.icon(
             onPressed: () {
@@ -434,7 +547,7 @@ class _MasterManagementMapWorkspaceState
               );
             },
             icon: const Icon(Icons.visibility_outlined, size: 18),
-            label: const Text('Show credentials'),
+            label: Text(context.opsTr('Show credentials')),
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.white70,
               side: BorderSide(color: widget.accent.withValues(alpha: 0.5)),
@@ -446,7 +559,8 @@ class _MasterManagementMapWorkspaceState
             future: FleetGateCredentialsService.gateAccountExists(callSign),
             builder: (context, snap) {
               final hasGate = snap.data ?? false;
-              final label = hasGate ? 'Reset credentials' : 'Get credentials';
+              final label =
+                  hasGate ? context.opsTr('Reset credentials') : context.opsTr('Get credentials');
               return FilledButton.icon(
                 onPressed: snap.connectionState == ConnectionState.waiting
                     ? null
@@ -462,7 +576,7 @@ class _MasterManagementMapWorkspaceState
                 icon: const Icon(Icons.edit_note_rounded, size: 18),
                 label: Text(
                   snap.connectionState == ConnectionState.waiting
-                      ? 'Credentials…'
+                      ? context.opsTr('Credentials…')
                       : label,
                 ),
                 style: FilledButton.styleFrom(backgroundColor: widget.accent),
@@ -488,15 +602,61 @@ class _MasterManagementMapWorkspaceState
             ),
           ),
           const SizedBox(height: 8),
-          _kv('ID', hosp.id),
-          _kv('Region', hosp.region),
+          _kv(context.opsTr('ID'), hosp.id),
+          _kv(context.opsTr('Region'), hosp.region),
           _kv(
-            'Beds',
-            '${hosp.bedsAvailable} available / ${hosp.bedsTotal} capacity',
+            context.opsTr('Beds'),
+            context
+                .opsTr('{available} available / {total} capacity')
+                .replaceAll('{available}', '${hosp.bedsAvailable}')
+                .replaceAll('{total}', '${hosp.bedsTotal}'),
           ),
-          _kv('Updated', df.format(hosp.updatedAt.toLocal())),
+          _kv(context.opsTr('Updated'), df.format(hosp.updatedAt.toLocal())),
+          if (hosp.lat != null && hosp.lng != null) ...[
+            _kv(
+              context.opsTr('GPS'),
+              '${hosp.lat!.toStringAsFixed(5)}, ${hosp.lng!.toStringAsFixed(5)}',
+            ),
+            const SizedBox(height: 12),
+            if (_editingHospitalLocation && _editLocationHospitalId == hosp.id) ...[
+              Text(
+                context.opsTr('Move the orange pin on the map, then save.'),
+                style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 11,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: _cancelEditHospitalLocation,
+                    child: Text(context.opsTr('Cancel')),
+                  ),
+                  const Spacer(),
+                  FilledButton.icon(
+                    onPressed: _saveEditedHospitalLocation,
+                    icon: const Icon(Icons.save_outlined, size: 18),
+                    label: Text(context.opsTr('Save location')),
+                    style: FilledButton.styleFrom(backgroundColor: widget.accent),
+                  ),
+                ],
+              ),
+            ] else
+              OutlinedButton.icon(
+                onPressed: () => _beginEditHospitalLocation(hosp),
+                icon: const Icon(Icons.edit_location_alt_outlined, size: 18),
+                label: Text(context.opsTr('Edit location')),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white70,
+                  side: BorderSide(color: widget.accent.withValues(alpha: 0.55)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+          ],
           if (hosp.offeredServices.isNotEmpty)
-            _kv('Services', hosp.offeredServices.take(6).join(', ')),
+            _kv(context.opsTr('Services'), hosp.offeredServices.take(6).join(', ')),
           if (note.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
@@ -520,7 +680,7 @@ class _MasterManagementMapWorkspaceState
               );
             },
             icon: const Icon(Icons.visibility_outlined, size: 18),
-            label: const Text('Show credentials'),
+            label: Text(context.opsTr('Show credentials')),
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.white70,
               side: const BorderSide(color: Colors.white24),
@@ -547,8 +707,8 @@ class _MasterManagementMapWorkspaceState
             icon: const Icon(Icons.edit_note_rounded, size: 18),
             label: Text(
               !hosp.hasStaffCredentials
-                  ? 'Get credentials'
-                  : 'Reset credentials',
+                  ? context.opsTr('Get credentials')
+                  : context.opsTr('Reset credentials'),
             ),
             style: FilledButton.styleFrom(backgroundColor: widget.accent),
           ),
@@ -561,10 +721,12 @@ class _MasterManagementMapWorkspaceState
         padding: const EdgeInsets.all(16),
         child: Text(
           _category == _MgmtCategory.fleet
-              ? 'Tap a fleet marker or pick a unit in the list to manage it.'
+              ? context.opsTr('Tap a fleet marker or pick a unit in the list to manage it.')
               : _category == _MgmtCategory.hospitals
-              ? 'Tap a hospital marker or pick a row in the list for capacity and onboarding.'
-              : 'Select a category in the left column.',
+              ? context.opsTr(
+                  'Tap a hospital marker or pick a row in the list for capacity and onboarding.',
+                )
+              : context.opsTr('Select a category in the left column.'),
           textAlign: TextAlign.center,
           style: const TextStyle(
             color: Colors.white38,
@@ -587,7 +749,7 @@ class _MasterManagementMapWorkspaceState
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
               child: Text(
-                '${inZone.length} units · ${_zone.label}',
+                '${inZone.length} ${inZone.length == 1 ? context.opsTr('unit') : context.opsTr('units')} · ${_zone.label}',
                 style: const TextStyle(
                   color: Colors.white54,
                   fontWeight: FontWeight.w700,
@@ -597,13 +759,13 @@ class _MasterManagementMapWorkspaceState
             ),
             Expanded(
               child: inZone.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Padding(
-                        padding: EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(16),
                         child: Text(
-                          'No fleet documents in Firestore for this view.',
+                          context.opsTr('No fleet documents in Firestore for this view.'),
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white38, fontSize: 12),
+                          style: const TextStyle(color: Colors.white38, fontSize: 12),
                         ),
                       ),
                     )
@@ -653,11 +815,13 @@ class _MasterManagementMapWorkspaceState
                                   Text(
                                     avail
                                         ? (aid.isNotEmpty
-                                              ? 'Responding · $aid'
-                                              : 'Standby / available')
+                                              ? context
+                                                  .opsTr('Responding · {incident}')
+                                                  .replaceAll('{incident}', aid)
+                                              : context.opsTr('Standby / available'))
                                         : (isFleetUnitPlaceholderDoc(d.id)
-                                              ? 'Registered · no operator signed in'
-                                              : 'Off duty / unavailable'),
+                                              ? context.opsTr('Registered · no operator signed in')
+                                              : context.opsTr('Off duty / unavailable')),
                                     style: TextStyle(
                                       color: avail
                                           ? Colors.lightGreenAccent
@@ -681,9 +845,7 @@ class _MasterManagementMapWorkspaceState
           children: [
             Icon(Icons.groups_rounded, size: 32, color: widget.accent),
             const SizedBox(height: 12),
-            const Text(
-              'Volunteer console',
-              style: TextStyle(
+            Text(context.opsTr('Volunteer console'), style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w800,
                 fontSize: 14,
@@ -691,7 +853,7 @@ class _MasterManagementMapWorkspaceState
             ),
             const SizedBox(height: 8),
             Text(
-              'Approvals and Lookup are open in the main area →',
+              context.opsTr('Approvals and Lookup are open in the main area →'),
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.45),
                 fontSize: 11,
@@ -702,13 +864,13 @@ class _MasterManagementMapWorkspaceState
         );
       case _MgmtCategory.hospitals:
         if (_hospitalRows.isEmpty) {
-          return const Center(
+          return Center(
             child: Padding(
-              padding: EdgeInsets.all(16),
+              padding: const EdgeInsets.all(16),
               child: Text(
-                'No hospitals in ops_hospitals yet.',
+                context.opsTr('No hospitals in ops_hospitals yet.'),
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white38, fontSize: 12),
+                style: const TextStyle(color: Colors.white38, fontSize: 12),
               ),
             ),
           );
@@ -721,7 +883,9 @@ class _MasterManagementMapWorkspaceState
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
               child: Text(
-                'Live grid · $avail avail / $cap capacity',
+                context
+                    .opsTr('Live grid · {detail}')
+                    .replaceAll('{detail}', '$avail avail / $cap capacity'),
                 style: const TextStyle(
                   color: Colors.white54,
                   fontWeight: FontWeight.w700,
@@ -742,6 +906,13 @@ class _MasterManagementMapWorkspaceState
                         final lat = r.lat;
                         final lng = r.lng;
                         setState(() {
+                          if (_editingHospitalLocation &&
+                              _editLocationHospitalId != null &&
+                              _editLocationHospitalId != r.id) {
+                            _editingHospitalLocation = false;
+                            _editLocationHospitalId = null;
+                            _editLocationDraft = null;
+                          }
                           _selectedHospitalId = r.id;
                           _selectedFleetDocId = null;
                         });
@@ -799,7 +970,7 @@ class _MasterManagementMapWorkspaceState
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
             children: [
               Text(
-                'Onboard facility',
+                context.opsTr('Onboard facility'),
                 style: TextStyle(
                   color: widget.accent,
                   fontWeight: FontWeight.w900,
@@ -810,24 +981,26 @@ class _MasterManagementMapWorkspaceState
               TextField(
                 controller: _onboardIdCtrl,
                 style: const TextStyle(color: Colors.white, fontSize: 13),
-                decoration: _fieldDeco('Hospital doc ID (ops_hospitals)'),
+                decoration: _fieldDeco(context.opsTr('Hospital doc ID (ops_hospitals)')),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: _onboardNameCtrl,
                 style: const TextStyle(color: Colors.white, fontSize: 13),
-                decoration: _fieldDeco('Display name'),
+                decoration: _fieldDeco(context.opsTr('Display name')),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: _onboardVicinityCtrl,
                 style: const TextStyle(color: Colors.white, fontSize: 13),
-                decoration: _fieldDeco('City / area'),
+                decoration: _fieldDeco(context.opsTr('City / area')),
               ),
               const SizedBox(height: 8),
-              const Text(
-                "Next: tap the map at the hospital's exact entrance or ambulance bay, then continue to generate staff credentials.",
-                style: TextStyle(
+              Text(
+                context.opsTr(
+                  "Next: tap the map at the hospital's exact entrance or ambulance bay, then continue to generate staff credentials.",
+                ),
+                style: const TextStyle(
                   color: Colors.white38,
                   fontSize: 10,
                   height: 1.35,
@@ -837,7 +1010,7 @@ class _MasterManagementMapWorkspaceState
               FilledButton.icon(
                 onPressed: _beginOnboardingMapPick,
                 icon: const Icon(Icons.add_moderator_outlined, size: 18),
-                label: const Text('Start onboarding'),
+                label: Text(context.opsTr('Start onboarding')),
                 style: FilledButton.styleFrom(backgroundColor: widget.accent),
               ),
             ],
@@ -895,7 +1068,7 @@ class _MasterManagementMapWorkspaceState
                         Expanded(
                           child: _chip(
                             _MgmtCategory.fleet,
-                            'Fleet',
+                            context.opsTr('Fleet'),
                             Icons.local_shipping_outlined,
                           ),
                         ),
@@ -903,7 +1076,7 @@ class _MasterManagementMapWorkspaceState
                         Expanded(
                           child: _chip(
                             _MgmtCategory.volunteers,
-                            'Volunteers',
+                            context.opsTr('Volunteers'),
                             Icons.groups_outlined,
                           ),
                         ),
@@ -915,7 +1088,7 @@ class _MasterManagementMapWorkspaceState
                         Expanded(
                           child: _chip(
                             _MgmtCategory.hospitals,
-                            'Hospitals',
+                            context.opsTr('Hospitals'),
                             Icons.local_hospital_outlined,
                           ),
                         ),
@@ -923,7 +1096,7 @@ class _MasterManagementMapWorkspaceState
                         Expanded(
                           child: _chip(
                             _MgmtCategory.facility,
-                            'Facility setup',
+                            context.opsTr('Facility setup'),
                             Icons.add_business_outlined,
                           ),
                         ),
@@ -973,12 +1146,32 @@ class _MasterManagementMapWorkspaceState
                             padding: EdgeInsets.zero,
                             onMapCreated: (c) => _mapCtl = c,
                             onTap: (LatLng pos) {
+                              if (_editingHospitalLocation) {
+                                if (!_zone.containsLatLng(pos)) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        context
+                                            .opsTr('Tap inside {zone} to place the hospital.')
+                                            .replaceAll('{zone}', _zone.label),
+                                      ),
+                                      backgroundColor: AppColors.slate700,
+                                    ),
+                                  );
+                                  return;
+                                }
+                                setState(() => _editLocationDraft = pos);
+                                unawaited(_focusOn(pos));
+                                return;
+                              }
                               if (_onboardingMapPickActive) {
                                 if (!_zone.containsLatLng(pos)) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
                                       content: Text(
-                                        'Tap inside ${_zone.label} to place the hospital.',
+                                        context
+                                            .opsTr('Tap inside {zone} to place the hospital.')
+                                            .replaceAll('{zone}', _zone.label),
                                       ),
                                       backgroundColor: AppColors.slate700,
                                     ),
@@ -996,7 +1189,76 @@ class _MasterManagementMapWorkspaceState
                               }
                             },
                           ),
-                          if (_onboardingMapPickActive)
+                          if (_editingHospitalLocation)
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              top: 0,
+                              child: Material(
+                                color: Colors.black.withValues(alpha: 0.78),
+                                elevation: 6,
+                                child: Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    14,
+                                    12,
+                                    14,
+                                    12,
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.edit_location_alt_rounded,
+                                            color: widget.accent,
+                                            size: 22,
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text(
+                                              context.opsTr(
+                                                'Tap the map to move the pin, then Save.',
+                                              ),
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 13,
+                                                height: 1.35,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
+                                      Row(
+                                        children: [
+                                          TextButton(
+                                            onPressed: _cancelEditHospitalLocation,
+                                            child: Text(context.opsTr('Cancel')),
+                                          ),
+                                          const Spacer(),
+                                          FilledButton.icon(
+                                            onPressed: _saveEditedHospitalLocation,
+                                            icon: const Icon(
+                                              Icons.save_outlined,
+                                              size: 18,
+                                            ),
+                                            label: Text(context.opsTr('Save location')),
+                                            style: FilledButton.styleFrom(
+                                              backgroundColor: widget.accent,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            )
+                          else if (_onboardingMapPickActive)
                             Positioned(
                               left: 0,
                               right: 0,
@@ -1027,8 +1289,12 @@ class _MasterManagementMapWorkspaceState
                                           Expanded(
                                             child: Text(
                                               _onboardingPickedLatLng == null
-                                                  ? 'Tap the map at the exact hospital entrance or main drop-off point.'
-                                                  : 'Orange pin shows the saved point. Adjust by tapping elsewhere, or continue.',
+                                                  ? context.opsTr(
+                                                      'Tap the map at the exact hospital entrance or main drop-off point.',
+                                                    )
+                                                  : context.opsTr(
+                                                      'Orange pin shows the saved point. Adjust by tapping elsewhere, or continue.',
+                                                    ),
                                               style: const TextStyle(
                                                 color: Colors.white,
                                                 fontSize: 13,
@@ -1044,7 +1310,7 @@ class _MasterManagementMapWorkspaceState
                                         children: [
                                           TextButton(
                                             onPressed: _cancelOnboardingMapPick,
-                                            child: const Text('Cancel'),
+                                            child: Text(context.opsTr('Cancel')),
                                           ),
                                           const Spacer(),
                                           FilledButton.icon(
@@ -1054,8 +1320,8 @@ class _MasterManagementMapWorkspaceState
                                               Icons.arrow_forward_rounded,
                                               size: 18,
                                             ),
-                                            label: const Text(
-                                              'Continue to credentials',
+                                            label: Text(
+                                              context.opsTr('Continue to credentials'),
                                             ),
                                             style: FilledButton.styleFrom(
                                               backgroundColor: widget.accent,

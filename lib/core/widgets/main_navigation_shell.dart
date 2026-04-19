@@ -530,7 +530,7 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell> with 
       ConnectivityService().start();
       unawaited(
         OfflineSosStatusService.markPendingIfOffline(
-          incidentId: createdId!,
+          incidentId: createdId,
           likelyOffline: !ConnectivityService().isOnline,
         ),
       );
@@ -545,7 +545,7 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell> with 
           lat: pos.latitude,
           lng: pos.longitude,
           type: 'General Emergency',
-          incidentId: createdId!,
+          incidentId: createdId,
           victimCount: 1,
           freeText: 'emergencyOS shell SOS',
         );
@@ -555,7 +555,7 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell> with 
             lat: pos.latitude,
             lng: pos.longitude,
             type: 'General Emergency',
-            incidentId: createdId!,
+            incidentId: createdId,
             victimCount: 1,
             freeText: 'emergencyOS shell SOS',
           ),

@@ -363,7 +363,7 @@ Hospitals get their own slice — a **Hospital Bridge** view showing the incomin
 └───────────────────────────────────────────────────────────────────────────────┘
                                      │
 ┌────────────────────────────────────▼──────────────────────────────────────┐
-│                     CLOUD FUNCTIONS v2 (Node.js 18)                         │
+│                     CLOUD FUNCTIONS v2 (Node.js 22)                         │
 │   dispatchSOS · dispatchHospitalInHex · lifelineChat                        │
 │   analyzeTriageImage · generateSituationBriefForIncident                    │
 │   acceptHospitalDispatch · declineHospitalDispatch                          │
@@ -404,7 +404,7 @@ Hospitals get their own slice — a **Hospital Bridge** view showing the incomin
 | **AI Brain** | **Gemini 2.5 Flash** (triage vision, LIFELINE chat, scene brief, ops analytics) |
 | **Voice AI** | LiveKit Agents (TypeScript) · OpenAI Realtime · @livekit/noise-cancellation-node |
 | **WebRTC** | livekit_client (Flutter) · livekit-server-sdk (Node.js) |
-| **Backend** | **Firebase Cloud Functions v2** (Node.js 18) — 3,358 LOC |
+| **Backend** | **Firebase Cloud Functions v2** (Node.js 22) — 3,358 LOC |
 | **Database** | **Cloud Firestore** — real-time + offline persistence (50 MB cache) |
 | **Auth** | **Firebase Auth** — Google Sign-In, Email/Password, Anonymous, reCAPTCHA v3 |
 | **Push** | **Firebase Cloud Messaging** — 3-layer dispatch |
@@ -490,7 +490,7 @@ Token TTL: 6 hours for emergency bridges, 12 hours for comms bridges.
 ### Prerequisites
 
 - Flutter SDK `^3.11.3`
-- Node.js 18+
+- Node.js 22+ (required for Cloud Functions; matches `functions/package.json` engines field)
 - Firebase CLI
 - A Firebase project with Firestore, Auth, FCM, Storage, and App Check enabled
 
@@ -579,6 +579,26 @@ firebase deploy --only hosting
 
 `LIVEKIT_URL` · `LIVEKIT_API_KEY` · `LIVEKIT_API_SECRET` · `OPENAI_API_KEY`
 
+### Browser-side key hardening
+
+Only two keys are shipped to the browser today: the Firebase Web API key (in
+`lib/firebase_options.dart`) and the Google Maps JavaScript API key (in
+`web/index.html`). Both must be tightened in Google Cloud Console before any
+public launch:
+
+- **Firebase Web API key** — restrict to the Firebase Hosting origins
+  (`*.web.app`, `*.firebaseapp.com`, and your custom domain). Firestore and
+  Auth are already gated by project rules and App Check, so the key is an
+  identifier rather than a secret, but restriction prevents cross-project
+  abuse.
+- **Google Maps JS API key** — set an HTTP-referrer allowlist identical to
+  the hosting origins and restrict it to the Maps JavaScript, Places, and
+  Geocoding APIs only. Keep billing quotas conservative.
+- **Gemini** — never ship a client-side key. All Gemini calls go through
+  Cloud Functions (`functions/` reads `GEMINI_API_KEY` from Secret Manager).
+  The `GEMINI_API_KEY` dart-define in legacy debug paths is deprecated; treat
+  it as test-only.
+
 ---
 
 ## Key Design Decisions (Why it is built this way)
@@ -617,7 +637,7 @@ python scripts/generate_dashboard_translations.py
 
 ## Screens
 
-Sample screenshots are in `LiveLine_Images/` and `Map_Marker/`. Highlights:
+Sample screenshots are in [`docs/screenshots/`](docs/screenshots/) and map-marker assets in [`Map_Marker/`](Map_Marker/). Highlights:
 
 - SOS slide-to-confirm + active locked screen with live ETA
 - Hex-grid command center with zoomed incident inspector

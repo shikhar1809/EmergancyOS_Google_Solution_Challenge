@@ -98,7 +98,6 @@ class _MedicalDetailsScreenState extends ConsumerState<MedicalDetailsScreen> {
           .timeout(const Duration(seconds: 5));
 
       if (!context.mounted) return;
-      final l = AppLocalizations.of(context);
 
       if (doc.exists && doc.data() != null) {
         final data = doc.data()!;

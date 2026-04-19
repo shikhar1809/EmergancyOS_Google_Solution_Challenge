@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -41,6 +40,7 @@ import 'widgets/fleet_credentials_dialog.dart';
 import 'widgets/hospital_onboarding_dialog.dart';
 import 'widgets/master_command_sidebar.dart';
 import 'hospital_live_ops_screen.dart' show HospitalOverviewCapacitySection;
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 enum _LiveOpsDetailKind {
   none,
@@ -101,8 +101,8 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
   IncidentStatus? _statusFilter;
   String _typeFilter = '';
   TimeWin _timeWin = TimeWin.h24;
-  bool _nearSelectionOnly = false;
-  bool _onlyWithVolunteers = false;
+  final bool _nearSelectionOnly = false;
+  final bool _onlyWithVolunteers = false;
   bool _onlyEmsActive = false;
   bool _onlySmsLinked = false;
 
@@ -395,6 +395,7 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
         _volunteerDutyDocs,
         anchor,
       ).map((v) => LatLng(v.lat, v.lng)).toList(),
+      useMainAppHospitalDensityColors: true,
     );
   }
 
@@ -560,6 +561,7 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
     return null;
   }
 
+  // ignore: unused_element
   SosIncident? _incidentById(String id) {
     for (final d in _allIncidentDocs) {
       if (d.id == id) return SosIncident.fromFirestore(d);
@@ -573,7 +575,7 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
     try {
       await IncidentService.setAdminDispatchNote(sel.id, _noteCtrl.text.trim());
       if (!mounted) return;
-      sm.showSnackBar(const SnackBar(content: Text('Dispatch note saved')));
+      sm.showSnackBar(SnackBar(content: Text(context.opsTr('Dispatch note saved'))));
     } catch (e) {
       if (!mounted) return;
       sm.showSnackBar(SnackBar(content: Text('Save failed: $e')));
@@ -1432,7 +1434,7 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Clear selection',
+                  tooltip: context.opsTr('Clear selection'),
                   onPressed: () =>
                       _applyIncidentSelection(null, _cachedFiltered),
                   icon: const Icon(
@@ -1565,7 +1567,7 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
                   ),
                   filled: true,
                   fillColor: Colors.black26,
-                  hintText: 'Search id / name / type',
+                  hintText: context.opsTr('Search id / name / type'),
                   hintStyle: TextStyle(
                     color: Colors.white.withValues(alpha: 0.35),
                     fontSize: 11,
@@ -1598,9 +1600,9 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
                   dropdownColor: AppColors.slate800,
                   style: const TextStyle(color: Colors.white, fontSize: 11),
                   items: [
-                    const DropdownMenuItem<IncidentStatus?>(
+                    DropdownMenuItem<IncidentStatus?>(
                       value: null,
-                      child: Text('All statuses'),
+                      child: Text(context.opsTr('All statuses')),
                     ),
                     for (final s in IncidentStatus.values)
                       DropdownMenuItem<IncidentStatus?>(
@@ -1621,17 +1623,15 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String?>(
                   value: _typeFilter.trim().isEmpty ? null : _typeFilter,
-                  hint: const Text(
-                    'All types',
-                    style: TextStyle(color: Colors.white54, fontSize: 11),
+                  hint: Text(context.opsTr('All types'), style: TextStyle(color: Colors.white54, fontSize: 11),
                   ),
                   isDense: true,
                   dropdownColor: AppColors.slate800,
                   style: const TextStyle(color: Colors.white, fontSize: 11),
                   items: [
-                    const DropdownMenuItem<String?>(
+                    DropdownMenuItem<String?>(
                       value: null,
-                      child: Text('All types'),
+                      child: Text(context.opsTr('All types')),
                     ),
                     for (final t in sortedTypes)
                       DropdownMenuItem<String?>(
@@ -1655,13 +1655,13 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
                   isDense: true,
                   dropdownColor: AppColors.slate800,
                   style: const TextStyle(color: Colors.white, fontSize: 11),
-                  items: const [
-                    DropdownMenuItem(value: TimeWin.h1, child: Text('1h (active)')),
-                    DropdownMenuItem(value: TimeWin.h24, child: Text('24h')),
-                    DropdownMenuItem(value: TimeWin.d7, child: Text('7d')),
+                  items: [
+                    DropdownMenuItem(value: TimeWin.h1, child: Text(context.opsTr('1h (active)'))),
+                    DropdownMenuItem(value: TimeWin.h24, child: Text(context.opsTr('24h'))),
+                    DropdownMenuItem(value: TimeWin.d7, child: Text(context.opsTr('7d'))),
                     DropdownMenuItem(
                       value: TimeWin.all,
-                      child: Text('All time'),
+                      child: Text(context.opsTr('All time')),
                     ),
                   ],
                   onChanged: (v) {
@@ -1676,7 +1676,7 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
             ),
             const SizedBox(width: 8),
             FilterChip(
-              label: const Text('EMS phase'),
+              label: Text(context.opsTr('EMS phase')),
               selected: _onlyEmsActive,
               onSelected: (v) => setState(() {
                 _onlyEmsActive = v;
@@ -1698,7 +1698,7 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
             ),
             const SizedBox(width: 8),
             FilterChip(
-              label: const Text('SMS-linked'),
+              label: Text(context.opsTr('SMS-linked')),
               selected: _onlySmsLinked,
               onSelected: (v) => setState(() {
                 _onlySmsLinked = v;
@@ -1736,7 +1736,6 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
       if (doc != null) {
         final data = doc.data();
         final driver = data['driverName'] as String? ?? 'Pending / Unknown';
-        final copassenger = data['coPassenger'] as String? ?? '-';
         final aid = data['assignedIncidentId'] as String?;
         final staffed = fleetUnitIsStaffedAvailable(data, id);
         final status = (data['status'] as String?)?.trim().isNotEmpty == true
@@ -1832,32 +1831,24 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.slate800,
-        title: const Text(
-          'Mark zone type',
-          style: TextStyle(color: Colors.white),
+        title: Text(context.opsTr('Mark zone type'), style: TextStyle(color: Colors.white),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             ListTile(
-              title: const Text(
-                'Hospital',
-                style: TextStyle(color: Colors.white),
+              title: Text(context.opsTr('Hospital'), style: TextStyle(color: Colors.white),
               ),
               onTap: () => Navigator.pop(ctx, 'hospital'),
             ),
             ListTile(
-              title: const Text(
-                'Trauma hub',
-                style: TextStyle(color: Colors.white),
+              title: Text(context.opsTr('Trauma hub'), style: TextStyle(color: Colors.white),
               ),
               onTap: () => Navigator.pop(ctx, 'trauma_hub'),
             ),
             ListTile(
-              title: const Text(
-                'Ambulance standby',
-                style: TextStyle(color: Colors.white),
+              title: Text(context.opsTr('Ambulance standby'), style: TextStyle(color: Colors.white),
               ),
               onTap: () => Navigator.pop(ctx, 'ambulance_standby'),
             ),
@@ -1866,7 +1857,7 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: Text(context.opsTr('Cancel')),
           ),
         ],
       ),
@@ -1882,7 +1873,7 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Coverage zone saved')));
+        ).showSnackBar(SnackBar(content: Text(context.opsTr('Coverage zone saved'))));
       }
     } catch (e) {
       if (mounted) {
@@ -1966,8 +1957,8 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
       case _LiveOpsDetailKind.incident:
         final e = incidentSel;
         if (e == null) {
-          return const Center(
-            child: Text('No incident', style: TextStyle(color: Colors.white38)),
+          return Center(
+            child: Text(context.opsTr('No incident'), style: TextStyle(color: Colors.white38)),
           );
         }
         return ListView(
@@ -2198,9 +2189,7 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
         return ListView(
           padding: const EdgeInsets.all(12),
           children: [
-            const Text(
-              'Simulated responder',
-              style: TextStyle(
+            Text(context.opsTr('Simulated responder'), style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w900,
                 fontSize: 16,
@@ -2311,7 +2300,6 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
 
     final acc = widget.access;
     final hexCoverM = _hexMeshCoverM;
-    final volDutyLatLng = dutyVols.map((v) => LatLng(v.lat, v.lng)).toList();
     final sceneTierForSelected = sel == null
         ? TierHealth.green
         : tierHealthAtVictimPin(
@@ -2668,6 +2656,7 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
           coverRadiusM: hexCoverM,
           hospitals: hospDirHex,
           volunteerPositions: volDutyLatLngHex,
+          useMainAppHospitalDensityColors: true,
         );
 
     return SizedBox.expand(
@@ -3004,16 +2993,12 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
                                             onChanged: (v) => setState(
                                               () => _ccShowHexGrid = v ?? true,
                                             ),
-                                            title: const Text(
-                                              'Coverage grid',
-                                              style: TextStyle(
+                                            title: Text(context.opsTr('Coverage grid'), style: TextStyle(
                                                 color: Colors.white70,
                                                 fontSize: 11,
                                               ),
                                             ),
-                                            subtitle: const Text(
-                                              'Green / yellow / red by facilities',
-                                              style: TextStyle(
+                                            subtitle: Text(context.opsTr('Green / yellow / red by facilities'), style: TextStyle(
                                                 color: Colors.white38,
                                                 fontSize: 9,
                                               ),
@@ -3029,9 +3014,7 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
                                               () => _ccShowActiveFleet =
                                                   v ?? true,
                                             ),
-                                            title: const Text(
-                                              'Active fleet',
-                                              style: TextStyle(
+                                            title: Text(context.opsTr('Active fleet'), style: TextStyle(
                                                 color: Colors.white70,
                                                 fontSize: 11,
                                               ),
@@ -3047,16 +3030,12 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
                                               () => _ccShowStandbyFleet =
                                                   v ?? true,
                                             ),
-                                            title: const Text(
-                                              'Standby fleet',
-                                              style: TextStyle(
+                                            title: Text(context.opsTr('Standby fleet'), style: TextStyle(
                                                 color: Colors.white70,
                                                 fontSize: 11,
                                               ),
                                             ),
-                                            subtitle: const Text(
-                                              'Available, unassigned',
-                                              style: TextStyle(
+                                            subtitle: Text(context.opsTr('Available, unassigned'), style: TextStyle(
                                                 color: Colors.white38,
                                                 fontSize: 9,
                                               ),
@@ -3071,9 +3050,7 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
                                             onChanged: (v) => setState(
                                               () => _ccShowStations = v ?? true,
                                             ),
-                                            title: const Text(
-                                              'Stations',
-                                              style: TextStyle(
+                                            title: Text(context.opsTr('Stations'), style: TextStyle(
                                                 color: Colors.white70,
                                                 fontSize: 11,
                                               ),
@@ -3107,16 +3084,12 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
                                                   _editCornerTaps = [];
                                                 }
                                               }),
-                                              title: const Text(
-                                                'Zone editor',
-                                                style: TextStyle(
+                                              title: Text(context.opsTr('Zone editor'), style: TextStyle(
                                                   color: Colors.white70,
                                                   fontSize: 11,
                                                 ),
                                               ),
-                                              subtitle: const Text(
-                                                'Tap a hex to zoom, then 4 map taps for corners',
-                                                style: TextStyle(
+                                              subtitle: Text(context.opsTr('Tap a hex to zoom, then 4 map taps for corners'), style: TextStyle(
                                                   color: Colors.white38,
                                                   fontSize: 9,
                                                 ),

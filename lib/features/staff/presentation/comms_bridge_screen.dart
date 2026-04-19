@@ -13,6 +13,7 @@ import '../../../services/incident_service.dart';
 import '../../../services/livekit_comms_bridge_service.dart';
 import '../../../services/ops_hospital_service.dart';
 import '../domain/admin_panel_access.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 /// Deep-link: Comms tab opens and joins this incident channel (`operation` | `emergency`).
 class CommsPendingJoin {
@@ -427,7 +428,7 @@ class _CommsBridgeScreenState extends State<CommsBridgeScreen> {
           if (_isMaster) ...[
             _serverOrb(
               selected: _selectedServerKey == _commandServer,
-              tooltip: 'Inter-hospital command',
+              tooltip: context.opsTr('Inter-hospital command'),
               icon: Icons.hub_rounded,
               accent: const Color(0xFFB388FF),
               onTap: () => setState(() => _selectedServerKey = _commandServer),
@@ -1072,7 +1073,7 @@ class _CommsBridgeScreenState extends State<CommsBridgeScreen> {
                       ),
                     ),
                     onPressed: _busy ? null : _disconnectRoom,
-                    child: const Text('Leave'),
+                    child: Text(context.opsTr('Leave')),
                   ),
                 ],
               ],

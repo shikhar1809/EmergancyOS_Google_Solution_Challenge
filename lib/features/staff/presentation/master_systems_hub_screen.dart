@@ -4,6 +4,7 @@ import '../../../core/theme/app_colors.dart';
 import '../domain/admin_panel_access.dart';
 import '../domain/command_center_accent.dart';
 import 'widgets/master_systems_status_section.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 /// Master **Systems** area (dock tab): integration routing, health, Firestore ping.
 class MasterSystemsHubScreen extends StatelessWidget {
@@ -25,9 +26,7 @@ class MasterSystemsHubScreen extends StatelessWidget {
               children: [
                 Icon(Icons.tune_rounded, color: accent, size: 28),
                 const SizedBox(width: 12),
-                const Text(
-                  'Systems',
-                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900),
+                Text(context.opsTr('Systems'), style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900),
                 ),
               ],
             ),

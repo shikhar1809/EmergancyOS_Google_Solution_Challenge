@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../services/fleet_gate_credentials_service.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 /// Master console: show or rotate `ops_fleet_accounts` password for a unit.
 class FleetCredentialsDialog extends StatefulWidget {
@@ -158,9 +159,7 @@ class _FleetCredentialsDialogState extends State<FleetCredentialsDialog> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'Fleet credentials',
-                                style: TextStyle(
+                              Text(context.opsTr('Fleet credentials'), style: TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w800,
                                   fontSize: 16,
@@ -213,9 +212,7 @@ class _FleetCredentialsDialogState extends State<FleetCredentialsDialog> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            const Text(
-                              'Operator sign-in (fleet console)',
-                              style: TextStyle(
+                            Text(context.opsTr('Operator sign-in (fleet console)'), style: TextStyle(
                                 color: Colors.orangeAccent,
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
@@ -264,7 +261,7 @@ class _FleetCredentialsDialogState extends State<FleetCredentialsDialog> {
                             child: OutlinedButton.icon(
                               onPressed: _loadingAction ? null : _resetCredentials,
                               icon: const Icon(Icons.refresh, size: 16),
-                              label: const Text('Reset credentials'),
+                              label: Text(context.opsTr('Reset credentials')),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: Colors.white70,
                                 side: const BorderSide(color: Colors.white24),
@@ -283,7 +280,7 @@ class _FleetCredentialsDialogState extends State<FleetCredentialsDialog> {
                                 padding:
                                     const EdgeInsets.symmetric(vertical: 10),
                               ),
-                              child: const Text('Done'),
+                              child: Text(context.opsTr('Done')),
                             ),
                           ),
                         ],

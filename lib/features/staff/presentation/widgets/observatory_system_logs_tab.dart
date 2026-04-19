@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/admin_panel_access.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 class ObservatorySystemLogsTab extends StatefulWidget {
   const ObservatorySystemLogsTab({
@@ -160,7 +161,7 @@ class _ObservatorySystemLogsTabState extends State<ObservatorySystemLogsTab> {
                 child: TextField(
                   style: const TextStyle(color: Colors.white, fontSize: 13),
                   decoration: InputDecoration(
-                    hintText: 'Filter logs…',
+                    hintText: context.opsTr('Filter logs…'),
                     hintStyle: TextStyle(
                       color: Colors.white.withValues(alpha: 0.3),
                     ),
@@ -184,11 +185,11 @@ class _ObservatorySystemLogsTabState extends State<ObservatorySystemLogsTab> {
                 dropdownColor: const Color(0xFF111827),
                 style: const TextStyle(color: Colors.white, fontSize: 13),
                 underline: const SizedBox(),
-                items: const [
-                  DropdownMenuItem(value: 'all', child: Text('All')),
-                  DropdownMenuItem(value: 'info', child: Text('Info')),
-                  DropdownMenuItem(value: 'warning', child: Text('Warning')),
-                  DropdownMenuItem(value: 'error', child: Text('Error')),
+                items: [
+                  DropdownMenuItem(value: 'all', child: Text(context.opsTr('All'))),
+                  DropdownMenuItem(value: 'info', child: Text(context.opsTr('Info'))),
+                  DropdownMenuItem(value: 'warning', child: Text(context.opsTr('Warning'))),
+                  DropdownMenuItem(value: 'error', child: Text(context.opsTr('Error'))),
                 ],
                 onChanged: (v) => setState(() => _levelFilter = v ?? 'all'),
               ),
@@ -196,7 +197,7 @@ class _ObservatorySystemLogsTabState extends State<ObservatorySystemLogsTab> {
               FilledButton.icon(
                 onPressed: _loading ? null : () => unawaited(_loadLogs()),
                 icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Refresh'),
+                label: Text(context.opsTr('Refresh')),
                 style: FilledButton.styleFrom(
                   backgroundColor: a.withValues(alpha: 0.85),
                 ),

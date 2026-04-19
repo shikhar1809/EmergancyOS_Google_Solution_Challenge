@@ -16,8 +16,14 @@ import 'ops_map_controller.dart';
 
 typedef EosMapCreatedCallback = void Function(OpsMapController controller);
 
-/// Drop-in replacement for [GoogleMap] that falls back to OSM raster tiles
-/// (flutter_map) when Google Maps fails to load or the app enables fallback.
+/// Drop-in replacement for [GoogleMap]: **Google Maps is always tried first**.
+/// OpenStreetMap via [flutter_map] is used only when Google fails (load timeout,
+/// `gm_authFailure` on web, or persisted auto-fallback), or when Firestore
+/// routing requests Leaflet **and** [ignoreRemoteLeafletTiles] is false.
+///
+/// Default [ignoreRemoteLeafletTiles] is true so fleet consoles use Google
+/// unless this device has activated OSM fallback. Pass `false` on volunteer /
+/// home surfaces that should honor `ops_integration_routing.mapsTiles: leaflet`.
 class EosHybridMap extends ConsumerStatefulWidget {
   const EosHybridMap({
     super.key,
@@ -66,11 +72,16 @@ class EosHybridMap extends ConsumerStatefulWidget {
     @Deprecated('Use mapId instead.') String? cloudMapId,
     this.googleMapLoadTimeout = const Duration(seconds: 14),
     this.forceGoogleTiles = false,
+    this.ignoreRemoteLeafletTiles = true,
   })  : assert(mapId == null || cloudMapId == null),
         mapId = mapId ?? cloudMapId;
 
   /// When true, always renders Google Maps tiles (ignores Leaflet fallback and remote routing).
   final bool forceGoogleTiles;
+
+  /// Staff ops consoles: ignore Firestore fleet `mapsTiles: leaflet`; use OSM only
+  /// when [mapsLeafletFallbackProvider] is true (real Google failure on this device).
+  final bool ignoreRemoteLeafletTiles;
 
   final CameraPosition initialCameraPosition;
   final String? style;
@@ -126,12 +137,28 @@ class _EosHybridMapState extends ConsumerState<EosHybridMap> {
   LeafletMapRuntime? _leafletRuntime;
   var _leafletOnCreatedFired = false;
 
+  bool _readUseLeaflet() {
+    if (widget.forceGoogleTiles) return false;
+    if (widget.ignoreRemoteLeafletTiles) {
+      return ref.read(mapsLeafletFallbackProvider);
+    }
+    return ref.read(effectiveMapsUseLeafletProvider);
+  }
+
+  bool _watchUseLeaflet() {
+    if (widget.forceGoogleTiles) return false;
+    if (widget.ignoreRemoteLeafletTiles) {
+      return ref.watch(mapsLeafletFallbackProvider);
+    }
+    return ref.watch(effectiveMapsUseLeafletProvider);
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (widget.forceGoogleTiles || !ref.read(effectiveMapsUseLeafletProvider)) {
+      if (widget.forceGoogleTiles || !_readUseLeaflet()) {
         _scheduleGoogleTimer();
       }
     });
@@ -209,14 +236,21 @@ class _EosHybridMapState extends ConsumerState<EosHybridMap> {
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<bool>(effectiveMapsUseLeafletProvider, (prev, next) {
-      if (widget.forceGoogleTiles) return;
-      if (next) _cancelGoogleTimer();
-      if (next && mounted) setState(() {});
-    });
+    if (widget.ignoreRemoteLeafletTiles) {
+      ref.listen<bool>(mapsLeafletFallbackProvider, (prev, next) {
+        if (widget.forceGoogleTiles) return;
+        if (next) _cancelGoogleTimer();
+        if (next && mounted) setState(() {});
+      });
+    } else {
+      ref.listen<bool>(effectiveMapsUseLeafletProvider, (prev, next) {
+        if (widget.forceGoogleTiles) return;
+        if (next) _cancelGoogleTimer();
+        if (next && mounted) setState(() {});
+      });
+    }
 
-    final useLeaflet =
-        !widget.forceGoogleTiles && ref.watch(effectiveMapsUseLeafletProvider);
+    final useLeaflet = _watchUseLeaflet();
     if (useLeaflet) {
       _cancelGoogleTimer();
       _leafletController ??= fm.MapController();

@@ -8,8 +8,8 @@ import '../../services/dispatch_chain_service.dart';
 import '../../services/incident_service.dart';
 import '../constants/app_constants.dart';
 import '../theme/app_colors.dart';
+import '../utils/ems_workflow_labels.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 
 import '../web_bridge/emergency_alarm.dart';
 import 'volunteer_voice_mode_prompt.dart';
@@ -255,7 +255,7 @@ class _IncomingEmergencyOverlayState extends State<IncomingEmergencyOverlay>
     final parts = <String>[];
     final phase = (_inc.emsWorkflowPhase ?? '').trim();
     if (phase.isNotEmpty) {
-      parts.add(phase.replaceAll('_', ' '));
+      parts.add(emsWorkflowPhaseShortLabel(phase));
     }
     final amb = _dispatchState?.assignment?.ambulanceDispatchStatus?.trim();
     if (amb != null && amb.isNotEmpty) parts.add(amb);

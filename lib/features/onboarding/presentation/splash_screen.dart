@@ -53,8 +53,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerPr
       // Drill sessions are also cleared on fresh launch so back-nav doesn't
       // accidentally re-enter drill mode.
       await DrillSessionPersistence.clear();
-      ref.read(drillSessionDashboardDemoProvider.notifier).state = false;
-      ref.read(drillVictimPracticeShellProvider.notifier).state = false;
+      ref.read(drillSessionDashboardDemoProvider.notifier).set(false);
+      ref.read(drillVictimPracticeShellProvider.notifier).set(false);
 
       // ── Regular-user crash recovery (preserved as-is) ─────────────────────
       // 1. Initial local check (fast path via SharedPreferences)
@@ -99,15 +99,15 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerPr
         }
 
         if (context.mounted) {
-          ref.read(drillSessionDashboardDemoProvider.notifier).state = false;
-          ref.read(drillVictimPracticeShellProvider.notifier).state = false;
+          ref.read(drillSessionDashboardDemoProvider.notifier).set(false);
+          ref.read(drillVictimPracticeShellProvider.notifier).set(false);
           context.go('/dashboard');
         }
       } else {
         await DrillSessionPersistence.clear();
         if (context.mounted) {
-          ref.read(drillSessionDashboardDemoProvider.notifier).state = false;
-          ref.read(drillVictimPracticeShellProvider.notifier).state = false;
+          ref.read(drillSessionDashboardDemoProvider.notifier).set(false);
+          ref.read(drillVictimPracticeShellProvider.notifier).set(false);
           context.go('/login');
         }
       }
@@ -118,8 +118,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerPr
         final user = FirebaseAuth.instance.currentUser;
         if (user != null && (prefs.getBool(DrillSessionPersistence.prefKeyActive) ?? false)) {
           final victim = prefs.getBool(DrillSessionPersistence.prefKeyVictimPractice) ?? false;
-          ref.read(drillSessionDashboardDemoProvider.notifier).state = true;
-          ref.read(drillVictimPracticeShellProvider.notifier).state = victim;
+          ref.read(drillSessionDashboardDemoProvider.notifier).set(true);
+          ref.read(drillVictimPracticeShellProvider.notifier).set(victim);
           if (context.mounted) context.go('/drill/dashboard');
           return;
         }
@@ -145,8 +145,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerPr
         }
       } catch (_) {}
       if (context.mounted) {
-        ref.read(drillSessionDashboardDemoProvider.notifier).state = false;
-        ref.read(drillVictimPracticeShellProvider.notifier).state = false;
+        ref.read(drillSessionDashboardDemoProvider.notifier).set(false);
+        ref.read(drillVictimPracticeShellProvider.notifier).set(false);
         context.go('/login');
       }
     }

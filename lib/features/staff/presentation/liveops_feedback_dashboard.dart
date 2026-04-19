@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../domain/admin_panel_access.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 class LiveOpsFeedbackDashboard extends StatefulWidget {
   const LiveOpsFeedbackDashboard({
@@ -133,14 +134,14 @@ class _LiveOpsFeedbackDashboardState extends State<LiveOpsFeedbackDashboard> {
     );
   }
 
-  Map<String, Color> _roleColors = {
+  final Map<String, Color> _roleColors = {
     'ambulance': Colors.redAccent,
     'volunteer': Colors.green,
     'self': Colors.purpleAccent,
     'other': Colors.grey,
   };
 
-  Map<String, Color> _outcomeColors = {
+  final Map<String, Color> _outcomeColors = {
     'resolved': Colors.greenAccent,
     'false_alarm': Colors.orangeAccent,
     'unresolved': Colors.redAccent,
@@ -301,9 +302,7 @@ class _LiveOpsFeedbackDashboardState extends State<LiveOpsFeedbackDashboard> {
                 ],
               ),
               const SizedBox(height: 24),
-              const Text(
-                'Recent Comments & Reports',
-                style: TextStyle(
+              Text(context.opsTr('Recent Comments & Reports'), style: TextStyle(
                   color: Colors.white,
                   fontSize: 18,
                   fontWeight: FontWeight.bold,

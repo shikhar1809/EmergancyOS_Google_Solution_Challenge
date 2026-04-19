@@ -24,6 +24,7 @@ import '../../../services/ops_hospital_service.dart';
 import '../domain/admin_panel_access.dart';
 import '../domain/command_center_accent.dart';
 import 'widgets/fleet_credentials_dialog.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 class AdminFleetManagementScreen extends StatefulWidget {
   const AdminFleetManagementScreen({
@@ -85,7 +86,7 @@ class _AdminFleetManagementScreenState extends State<AdminFleetManagementScreen>
         onPressed: () => _showCreateFleetSheet(context),
         backgroundColor: _accent,
         icon: const Icon(Icons.add),
-        label: const Text('New fleet'),
+        label: Text(context.opsTr('New fleet')),
       ),
       appBar: AppBar(
         backgroundColor: AppColors.slate800,
@@ -93,7 +94,7 @@ class _AdminFleetManagementScreenState extends State<AdminFleetManagementScreen>
           children: [
             Icon(Icons.directions_car_filled, color: _accent),
             const SizedBox(width: 12),
-            const Text('Fleet Management', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            Text(context.opsTr('Fleet Management'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
           ],
         ),
         bottom: PreferredSize(
@@ -121,8 +122,8 @@ class _AdminFleetManagementScreenState extends State<AdminFleetManagementScreen>
           );
 
           if (visibleDocs.isEmpty) {
-            return const Center(
-              child: Text('No fleet units available for your role.', style: TextStyle(color: Colors.white54, fontSize: 16)),
+            return Center(
+              child: Text(context.opsTr('No fleet units available for your role.'), style: TextStyle(color: Colors.white54, fontSize: 16)),
             );
           }
 
@@ -397,9 +398,7 @@ class _AdminFleetManagementScreenState extends State<AdminFleetManagementScreen>
                     operatorUid: docId,
                   ),
                   icon: const Icon(Icons.crisis_alert, size: 18),
-                  label: const Text(
-                    'Assign to accepted incident',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                  label: Text(context.opsTr('Assign to accepted incident'), style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
                   ),
                 ),
               ),
@@ -434,8 +433,8 @@ class _AdminFleetManagementScreenState extends State<AdminFleetManagementScreen>
       if (!context.mounted) return;
       if (snap.docs.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No accepted hospital consignments to assign.'),
+          SnackBar(
+            content: Text(context.opsTr('No accepted hospital consignments to assign.')),
             backgroundColor: Colors.orange,
           ),
         );
@@ -445,9 +444,7 @@ class _AdminFleetManagementScreenState extends State<AdminFleetManagementScreen>
         context: context,
         builder: (ctx) => AlertDialog(
           backgroundColor: AppColors.slate800,
-          title: const Text(
-            'Assign unit to incident',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+          title: Text(context.opsTr('Assign unit to incident'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
           ),
           content: SizedBox(
             width: 420,
@@ -544,7 +541,7 @@ class _AdminFleetManagementScreenState extends State<AdminFleetManagementScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Close'),
+              child: Text(context.opsTr('Close')),
             ),
           ],
         ),
@@ -649,6 +646,7 @@ class _FleetTrackingSheetState extends State<_FleetTrackingSheet> {
   double? _speedKmh;
   int? _etaMins;
   String _lastPingLabel = '—';
+  // ignore: unused_field
   LatLng? _etaVictimPin;
   String? _etaForIncidentId;
   int _tickCount = 0;
@@ -935,7 +933,7 @@ class _CreateFleetSheetState extends State<_CreateFleetSheet> {
     final cs = _callSignCtl.text.trim();
     if (cs.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a fleet call sign / ID'), backgroundColor: Colors.redAccent),
+        SnackBar(content: Text(context.opsTr('Enter a fleet call sign / ID')), backgroundColor: Colors.redAccent),
       );
       return;
     }
@@ -1012,8 +1010,8 @@ class _CreateFleetSheetState extends State<_CreateFleetSheet> {
                   controller: _callSignCtl,
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
-                    labelText: 'Fleet ID / call sign',
-                    hintText: 'e.g. EMS-LKO-57',
+                    labelText: context.opsTr('Fleet ID / call sign'),
+                    hintText: context.opsTr('e.g. EMS-LKO-57'),
                     labelStyle: const TextStyle(color: Colors.white54),
                     hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.35)),
                     enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
@@ -1025,13 +1023,13 @@ class _CreateFleetSheetState extends State<_CreateFleetSheet> {
                   value: _vehicleType, // ignore: deprecated_member_use
                   dropdownColor: AppColors.slate800,
                   style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
-                    labelText: 'Vehicle type',
+                  decoration: InputDecoration(
+                    labelText: context.opsTr('Vehicle type'),
                     labelStyle: TextStyle(color: Colors.white54),
                     enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
                   ),
-                  items: const [
-                    DropdownMenuItem(value: 'medical', child: Text('Medical / ambulance')),
+                  items: [
+                    DropdownMenuItem(value: 'medical', child: Text(context.opsTr('Medical / ambulance'))),
                   ],
                   onChanged: (v) {
                     if (v != null) setState(() => _vehicleType = v);
@@ -1042,7 +1040,7 @@ class _CreateFleetSheetState extends State<_CreateFleetSheet> {
                   controller: _driverCtl,
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
-                    labelText: 'Driver name',
+                    labelText: context.opsTr('Driver name'),
                     labelStyle: const TextStyle(color: Colors.white54),
                     enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
                     focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppColors.accentBlue)),
@@ -1053,7 +1051,7 @@ class _CreateFleetSheetState extends State<_CreateFleetSheet> {
                   controller: _coCtl,
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
-                    labelText: 'Co-passenger / EMT',
+                    labelText: context.opsTr('Co-passenger / EMT'),
                     labelStyle: const TextStyle(color: Colors.white54),
                     enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
                     focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppColors.accentBlue)),
@@ -1068,15 +1066,15 @@ class _CreateFleetSheetState extends State<_CreateFleetSheet> {
                       value: _hospitalId, // ignore: deprecated_member_use
                       dropdownColor: AppColors.slate800,
                       style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(
-                        labelText: 'Home hospital (optional)',
+                      decoration: InputDecoration(
+                        labelText: context.opsTr('Home hospital (optional)'),
                         labelStyle: TextStyle(color: Colors.white54),
                         enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
                       ),
                       items: [
-                        const DropdownMenuItem<String?>(
+                        DropdownMenuItem<String?>(
                           value: null,
-                          child: Text('None', style: TextStyle(color: Colors.white70)),
+                          child: Text(context.opsTr('None'), style: TextStyle(color: Colors.white70)),
                         ),
                         ...rows.map(
                           (h) => DropdownMenuItem<String?>(

@@ -1,58 +1,63 @@
 import 'dart:async';
 import 'dart:js_interop';
-import 'package:web/web.dart' as web;
+import 'dart:js_interop_unsafe';
 import 'package:flutter/foundation.dart';
 
-extension WindowExtension on web.Window {
-  @JS('_speechOnResult')
-  external set speechOnResult(JSFunction? value);
+/// Browser global (`window` in the main thread) as a raw [JSObject].
+///
+/// Using [globalContext] is the canonical way to reach the JS global under
+/// `dart:js_interop`. It avoids the Flutter web release build quirks we hit
+/// with `extension type` + `@JS('window')` patterns (which could emit
+/// `o.window.foo is not a function` even when `window.foo` was defined).
+JSObject get _g => globalContext;
 
-  @JS('_speechOnEnd')
-  external set speechOnEnd(JSFunction? value);
+/// Attempt to call `window[name](args...)`, returning `true` on success.
+///
+/// Does **not** pre-check `typeof window[name] === 'function'` because
+/// `getProperty` / `hasProperty` have proven flaky in release codegen; a
+/// direct `callMethod` is both simpler and more reliable, and we catch the
+/// native TypeError if the function really is missing.
+bool _tryCall(String name, List<JSAny?> args) {
+  try {
+    switch (args.length) {
+      case 0:
+        _g.callMethod<JSAny?>(name.toJS);
+        break;
+      case 1:
+        _g.callMethod<JSAny?>(name.toJS, args[0]);
+        break;
+      case 2:
+        _g.callMethod<JSAny?>(name.toJS, args[0], args[1]);
+        break;
+      case 3:
+        _g.callMethod<JSAny?>(name.toJS, args[0], args[1], args[2]);
+        break;
+      default:
+        throw ArgumentError('too many args');
+    }
+    return true;
+  } catch (e) {
+    debugPrint('[speech_web] window.$name() failed: $e');
+    return false;
+  }
+}
 
-  @JS('_speechOnError')
-  external set speechOnError(JSFunction? value);
+/// Whether the browser exposes a matching voice for [bcp47].
+bool hasLocalVoiceFor(String bcp47) {
+  try {
+    final r = _g.callMethod<JSAny?>('eosHasVoiceFor'.toJS, bcp47.toJS);
+    if (r == null) return false;
+    return (r as JSBoolean).toDart;
+  } catch (_) {
+    return false;
+  }
+}
 
-  @JS('_speechOnSound')
-  external set speechOnSound(JSFunction? value);
+Future<bool> nativeVoiceAvailable(String bcp47) async =>
+    Future<bool>.value(hasLocalVoiceFor(bcp47));
 
-  @JS('startSpeech')
-  external void startSpeech(JSString lang);
-
-  @JS('stopSpeech')
-  external void stopSpeech();
-
-  // ── New robust audio engine API (v2) ──────────────────────────────────────
-
-  /// Speak [text] in [lang]; call [doneCb] when done (or on watchdog timeout).
-  @JS('eosSpeak')
-  external void eosSpeak(JSString text, JSString lang, JSFunction? doneCb);
-
-  /// Cancel any in-flight TTS; fires pending doneCb immediately.
-  @JS('eosCancelSpeak')
-  external void eosCancelSpeak();
-
-  /// Resume AudioContext + unlock speechSynthesis (call from user gesture).
-  @JS('eosPrimeAudio')
-  external void eosPrimeAudio();
-
-  /// Bank a user-gesture token so async TTS calls can still play.
-  @JS('bankUserGesture')
-  external void bankUserGesture();
-
-  // ── Legacy shims still referenced by old call-sites ────────────────────
-
-  @JS('speakTextImpl')
-  external void jsSpeakTextImpl(JSString text, JSString lang);
-
-  @JS('cancelSpeechText')
-  external void jsCancelSpeechText();
-
-  @JS('resumeAudioForSpeech')
-  external void resumeAudioForSpeech(JSFunction run);
-
-  @JS('unlockWebSpeechSynthesis')
-  external void unlockWebSpeechSynthesis();
+void bankUserGestureForWeb() {
+  _tryCall('bankUserGesture', const []);
 }
 
 bool speechSupported() => true;
@@ -83,13 +88,18 @@ Future<void> _startWebListeningAsync(
   cancelSpeechText();
   await Future<void>.delayed(const Duration(milliseconds: 140));
   try {
-    web.window.speechOnResult = onResult.toJS;
-    web.window.speechOnEnd = onEnd.toJS;
-    web.window.speechOnError = onError.toJS;
-    web.window.speechOnSound = onSoundDetected.toJS;
-    web.window.startSpeech((languageCode.isEmpty ? 'en-IN' : languageCode).toJS);
+    _g['_speechOnResult'] = onResult.toJS;
+    _g['_speechOnEnd'] = onEnd.toJS;
+    _g['_speechOnError'] = onError.toJS;
+    _g['_speechOnSound'] = onSoundDetected.toJS;
+    final lang = (languageCode.isEmpty ? 'en-IN' : languageCode).toJS;
+
+    if (_tryCall('eosInteropSttStart', [lang])) return;
+    if (_tryCall('startSpeech', [lang])) return;
+
+    onError('stt_js_missing');
+    onEnd();
   } catch (e) {
-    // ignore: avoid_print
     debugPrint('startListening FAILED: $e');
     onError(e.toString());
     onEnd();
@@ -97,62 +107,41 @@ Future<void> _startWebListeningAsync(
 }
 
 void stopListening() {
-  try {
-    web.window.stopSpeech();
-  } catch (e) {
-    // ignore: avoid_print
-    debugPrint('stopListening FAILED: $e');
-  }
+  if (_tryCall('eosInteropSttStop', const [])) return;
+  _tryCall('stopSpeech', const []);
 }
 
 /// Core TTS: uses robust [eosSpeak] which handles AudioContext resume,
 /// voice selection, and the self-healing watchdog timer internally.
 void speakText(String text, {String lang = 'en-IN', void Function()? onDone}) {
+  final args = onDone != null
+      ? <JSAny?>[text.toJS, lang.toJS, onDone.toJS]
+      : <JSAny?>[text.toJS, lang.toJS];
+
+  if (_tryCall('eosSpeak', args)) return;
+
   try {
-    web.window.eosSpeak(
-      text.toJS,
-      lang.toJS,
-      onDone != null ? onDone.toJS : null,
+    _g.callMethod<JSAny?>(
+      'resumeAudioForSpeech'.toJS,
+      (() {
+        if (!_tryCall('speakTextImpl', [text.toJS, lang.toJS])) {
+          onDone?.call();
+        }
+      }).toJS,
     );
   } catch (_) {
-    // Fallback to legacy path if new JS API isn't available yet
-    try {
-      web.window.resumeAudioForSpeech((() {
-        try {
-          web.window.jsSpeakTextImpl(text.toJS, lang.toJS);
-        } catch (_) {
-          if (onDone != null) onDone();
-        }
-      }).toJS);
-    } catch (_) {
-      if (onDone != null) onDone();
-    }
+    onDone?.call();
   }
 }
 
 void cancelSpeechText() {
-  try {
-    web.window.eosCancelSpeak();
-  } catch (_) {
-    try {
-      web.window.jsCancelSpeechText();
-    } catch (e) {
-      // ignore: avoid_print
-      debugPrint('cancelSpeechText FAILED: $e');
-    }
-  }
+  if (_tryCall('eosCancelSpeak', const [])) return;
+  _tryCall('cancelSpeechText', const []);
 }
 
 /// Web autoplay policy: call from a user gesture before the first TTS.
-/// [eosPrimeAudio] handles both AudioContext resume and speechSynthesis
-/// unlock in a single synchronous call — critical for Safari/Chrome.
 void primeSpeechAudioContext() {
-  try {
-    web.window.eosPrimeAudio();
-  } catch (_) {
-    try {
-      web.window.resumeAudioForSpeech((() {}).toJS);
-      web.window.unlockWebSpeechSynthesis();
-    } catch (_) {}
-  }
+  if (_tryCall('eosPrimeAudio', const [])) return;
+  _tryCall('resumeAudioForSpeech', [(() {}).toJS]);
+  _tryCall('unlockWebSpeechSynthesis', const []);
 }

@@ -74,11 +74,16 @@ class _LifelineLevelPlayPageState extends State<LifelineLevelPlayPage> {
 
     setState(() => _saving = true);
     try {
-      await LifelineProgressRepository.instance.recordLevelPassed(level.id, level.xpReward);
+      final stageIndex =
+          kLifelineTrainingLevels.indexWhere((l) => l.id == level.id) + 1;
+      await LifelineProgressRepository.instance
+          .recordLevelPassed(stageIndex, level.xpReward);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Level ${level.id} cleared — +${level.xpReward} volunteer XP'),
+            content: Text(
+              'Level $stageIndex cleared — +${level.xpReward} volunteer XP',
+            ),
             backgroundColor: Colors.green.shade700,
           ),
         );

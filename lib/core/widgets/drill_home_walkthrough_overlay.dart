@@ -5,22 +5,23 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../services/voice_comms_service.dart';
+import '../l10n/app_localizations.dart';
 import '../theme/app_colors.dart';
 
 enum DrillHomeWalkthroughMode { sosVictim, volunteer }
 
 class _Step {
   final IconData icon;
-  final String title;
-  final String body;
+  final String titleKey;
+  final String bodyKey;
   final DrillTooltipAnchor anchor;
   /// When set, advancing to the *next* step happens automatically when the shell route matches.
   final String? advanceWhenPathContains;
 
   const _Step({
     required this.icon,
-    required this.title,
-    required this.body,
+    required this.titleKey,
+    required this.bodyKey,
     this.anchor = DrillTooltipAnchor.center,
     this.advanceWhenPathContains,
   });
@@ -73,58 +74,46 @@ class _DrillHomeWalkthroughOverlayState extends State<DrillHomeWalkthroughOverla
   static const _sosSteps = <_Step>[
     _Step(
       icon: Icons.school_rounded,
-      title: 'Victim practice shell',
-      body:
-          'You are in a separate practice area (URLs start with /drill). It looks like the real app but uses demo data only — your normal Home at /dashboard is untouched. '
-          'We will walk through every bottom tab, then you will use the red SOS button.',
+      titleKey: 'drill_sos_step_0_title',
+      bodyKey: 'drill_sos_step_0_body',
     ),
     _Step(
       icon: Icons.touch_app_rounded,
-      title: 'Step 1 — Home (Practice)',
-      body:
-          'Tap Home (cottage icon) below. You should see drill exit controls at the top; the leaderboard and stats use your live account data.',
+      titleKey: 'drill_sos_step_1_title',
+      bodyKey: 'drill_sos_step_1_body',
       anchor: DrillTooltipAnchor.navHome,
     ),
     _Step(
       icon: Icons.near_me_rounded,
-      title: 'Step 2 — Grid map',
-      body:
-          'Tap Grid. On the practice map you will see demo active SOS pins (pulsing) and you can tap the folder (Archived SOS) for demo closed incidents. None of this is a real dispatch.',
+      titleKey: 'drill_sos_step_2_title',
+      bodyKey: 'drill_sos_step_2_body',
       anchor: DrillTooltipAnchor.navGrid,
       advanceWhenPathContains: '/map',
     ),
     _Step(
       icon: Icons.medical_services_rounded,
-      title: 'Step 3 — Lifeline',
-      body:
-          'Tap Lifeline and skim the guides — same layout as production. The cyan bar says you are still in practice.',
+      titleKey: 'drill_sos_step_3_title',
+      bodyKey: 'drill_sos_step_3_body',
       anchor: DrillTooltipAnchor.navLifeline,
       advanceWhenPathContains: '/lifeline',
     ),
     _Step(
       icon: Icons.person_rounded,
-      title: 'Step 4 — Profile',
-      body:
-          'Tap Profile. Same screens as live; the banner reminds you this is still the drill shell.',
+      titleKey: 'drill_sos_step_4_title',
+      bodyKey: 'drill_sos_step_4_body',
       anchor: DrillTooltipAnchor.navProfile,
       advanceWhenPathContains: '/profile',
     ),
     _Step(
       icon: Icons.cottage_rounded,
-      title: 'Step 5 — Back to Home',
-      body:
-          'Tap Home again and confirm you see the practice dashboard. When you are there, tap Next.',
+      titleKey: 'drill_sos_step_5_title',
+      bodyKey: 'drill_sos_step_5_body',
       anchor: DrillTooltipAnchor.navHome,
     ),
     _Step(
       icon: Icons.warning_amber_rounded,
-      title: 'Step 6 — Open practice SOS (3 second hold)',
-      body:
-          'Do not expect this tour to open SOS for you.\n\n'
-          '1) Put your finger on the red circular SOS button (below the screen, center).\n'
-          '2) Press and hold — keep holding.\n'
-          '3) Wait until the white ring fills completely (about 3 seconds), then release.\n\n'
-          'That opens SOS practice only. Got it closes this guide so you can perform the hold.',
+      titleKey: 'drill_sos_step_6_title',
+      bodyKey: 'drill_sos_step_6_body',
       anchor: DrillTooltipAnchor.bottomSos,
     ),
   ];
@@ -132,30 +121,24 @@ class _DrillHomeWalkthroughOverlayState extends State<DrillHomeWalkthroughOverla
   static const _volunteerSteps = <_Step>[
     _Step(
       icon: Icons.volunteer_activism_rounded,
-      title: 'Volunteer practice shell',
-      body:
-          'You are in a separate practice area that mirrors live ops (not the real dashboard). '
-          'After Continue you will get a practice incoming alert, then MAP / TRIAGE / ON-SCENE with demo vehicles and logs only.',
+      titleKey: 'drill_vol_step_0_title',
+      bodyKey: 'drill_vol_step_0_body',
     ),
     _Step(
       icon: Icons.cottage_rounded,
-      title: 'Home first',
-      body:
-          'Real responders wait here for push/FCM. The next step is the same full-screen swipe alert you get on duty.',
+      titleKey: 'drill_vol_step_1_title',
+      bodyKey: 'drill_vol_step_1_body',
       anchor: DrillTooltipAnchor.navHome,
     ),
     _Step(
       icon: Icons.map_rounded,
-      title: 'Routes & ETAs',
-      body:
-          'After you accept, vehicles follow road polylines; the top card shows zone, responder count, and EMS ETA. '
-          'The triage log fills in over time like a live mission.',
+      titleKey: 'drill_vol_step_2_title',
+      bodyKey: 'drill_vol_step_2_body',
     ),
     _Step(
       icon: Icons.notifications_active_rounded,
-      title: 'Practice alert next',
-      body:
-          'Tap Continue, then swipe all the way to accept — same gesture as production. Alarm is muted in drill.',
+      titleKey: 'drill_vol_step_3_title',
+      bodyKey: 'drill_vol_step_3_body',
       anchor: DrillTooltipAnchor.center,
     ),
   ];
@@ -235,8 +218,10 @@ class _DrillHomeWalkthroughOverlayState extends State<DrillHomeWalkthroughOverla
   }
 
   void _playVoiceForCurrentStep() {
+    if (!context.mounted) return;
     VoiceCommsService.clearSpeakQueue();
-    VoiceCommsService.readAloud(_steps[_index].body);
+    final l10n = AppLocalizations.of(context);
+    VoiceCommsService.readAloud(l10n.get(_steps[_index].bodyKey));
   }
 
   Rect? _targetForStep(_Step step) {
@@ -390,6 +375,7 @@ class _TooltipCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 400),
       child: Material(
@@ -408,7 +394,7 @@ class _TooltipCard extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      step.title,
+                      l10n.get(step.titleKey),
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w900,
@@ -420,7 +406,7 @@ class _TooltipCard extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                step.body,
+                l10n.get(step.bodyKey),
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.88),
                   height: 1.45,

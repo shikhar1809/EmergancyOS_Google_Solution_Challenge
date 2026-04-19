@@ -12,6 +12,7 @@ import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'core/utils/early_locale.dart';
 import 'core/maps/maps_fallback_bootstrap.dart';
 import 'core/providers/high_contrast_ops_provider.dart';
 import 'core/providers/locale_provider.dart';
@@ -72,6 +73,11 @@ Future<void> bootstrapEmergencyOS(AppVariant variant) async {
     // when the app backgrounds, ensuring no ghost-volunteer dispatches occur.
     VolunteerPresenceService.initLifecycleObserver();
 
+    // Sync locale before prefs async completes (web: localStorage hint).
+    final earlyLocale = readEarlyAppLocaleHint();
+    if (earlyLocale != null && earlyLocale.isNotEmpty) {
+      VoiceCommsService.syncLocaleFromPreference(earlyLocale);
+    }
     // So first web TTS (readAloudImmediate) uses app language, not default en.
     await VoiceCommsService.getLocale();
 
@@ -115,7 +121,9 @@ Future<void> bootstrapEmergencyOS(AppVariant variant) async {
       final uid = user?.uid;
       if (uid != null && uid.isNotEmpty) {
         FcmService.init(uid);
-        unawaited(LeaderboardService.syncVolunteerPublicProfile(user!));
+        if (variant == AppVariant.main) {
+          unawaited(LeaderboardService.syncVolunteerPublicProfile(user!));
+        }
       }
     });
 

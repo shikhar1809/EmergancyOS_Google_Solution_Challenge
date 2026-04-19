@@ -57,6 +57,86 @@
   </script>
 
   <!-- ═══════════════════════════════════════════════════════════════════
+       EmergencyOS · Standalone STT bootstrap
+       ───────────────────────────────────────────────────────────────────
+       This runs BEFORE the big audio-engine IIFE below, so STT is always
+       wired up even if later scripts throw. Defines:
+         window.startSpeech(lang) / window.stopSpeech()
+         window.eosInteropSttStart(lang) / window.eosInteropSttStop()
+       and keeps the _speechOn* callbacks Dart installs on window.
+       ═══════════════════════════════════════════════════════════════════ -->
+  <script>
+    (function () {
+      try {
+        var _rec = null;
+        var _stopped = false;
+
+        function _start(lang) {
+          try {
+            var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SR) {
+              if (typeof window._speechOnError === 'function') window._speechOnError('not_supported');
+              if (typeof window._speechOnEnd === 'function')   window._speechOnEnd();
+              return;
+            }
+            if (_rec) { try { _rec.abort(); } catch(_) {} _rec = null; }
+            _stopped = false;
+            var r = new SR();
+            r.lang            = lang || 'en-IN';
+            r.continuous      = true;
+            r.interimResults  = true;
+            r.maxAlternatives = 1;
+            r.onsoundstart = function() { if (typeof window._speechOnSound === 'function') window._speechOnSound(); };
+            r.onspeechstart= function() { if (typeof window._speechOnSound === 'function') window._speechOnSound(); };
+            r.onresult     = function(e) {
+              var t = '';
+              for (var i = e.resultIndex; i < e.results.length; ++i) t += e.results[i][0].transcript;
+              if (t && typeof window._speechOnResult === 'function') window._speechOnResult(t);
+            };
+            r.onerror = function(e) {
+              var err = (e && e.error) || 'unknown';
+              if (err === 'aborted' || err === 'no-speech') return;
+              if (err === 'network' && _stopped) return;
+              if (err === 'network') {
+                try { r.abort(); } catch(_) {}
+                setTimeout(function() {
+                  if (!_stopped && typeof window.startSpeech === 'function') window.startSpeech(lang || 'en-IN');
+                }, 450);
+                return;
+              }
+              if (typeof window._speechOnError === 'function') window._speechOnError(err);
+            };
+            r.onend = function() {
+              _rec = null;
+              _stopped = false;
+              if (typeof window._speechOnEnd === 'function') window._speechOnEnd();
+            };
+            r.start();
+            _rec = r;
+          } catch (ex) {
+            if (typeof window._speechOnError === 'function') window._speechOnError(String(ex));
+            if (typeof window._speechOnEnd === 'function')   window._speechOnEnd();
+          }
+        }
+
+        function _stop() {
+          if (_rec) {
+            _stopped = true;
+            try { _rec.stop(); } catch (_) {}
+          }
+        }
+
+        window.startSpeech       = _start;
+        window.stopSpeech        = _stop;
+        window.eosInteropSttStart = _start;
+        window.eosInteropSttStop  = _stop;
+      } catch (bootErr) {
+        try { console.error('[EOS STT bootstrap] failed:', bootErr); } catch (_) {}
+      }
+    })();
+  </script>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
        EmergencyOS · Robust Audio Engine v2
        ───────────────────────────────────────────────────────────────────
        Single AudioContext shared by TTS, PTT, alarm.
@@ -111,6 +191,11 @@
       var _currentWatchdog = null;
       var _currentDoneCb   = null;
       var _ttsSpeaking     = false;
+
+      var _ua = (navigator && navigator.userAgent) ? navigator.userAgent : '';
+      var _isMobile = /Android|iPhone|iPad|iPod|Mobile|Mobi|IEMobile|Opera Mini/i.test(_ua);
+      var _isIOS    = /iPhone|iPad|iPod/i.test(_ua) ||
+                       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
       var _voicePrefs = {
         'en-IN': ['Microsoft Neerja Online (Natural) - English (India)', 'Microsoft Ravi - English (India)', 'Google UK English Female', 'Google US English'],
@@ -188,6 +273,18 @@
         return { voice: voice, utterLang: utterLang };
       }
 
+      /** True when a speechSynthesis voice matches the requested language (not English fallback). */
+      window.eosHasVoiceFor = function(lang) {
+        if (!window.speechSynthesis) return false;
+        var resolved = _resolveVoiceAndUtterLang(lang || 'en-IN');
+        var wantBase = (lang || 'en-IN').replace(/_/g, '-').split('-')[0].toLowerCase();
+        var gotLang = (resolved.voice && resolved.voice.lang)
+          ? String(resolved.voice.lang).replace(/_/g, '-')
+          : (resolved.utterLang || '');
+        var gotBase = gotLang.split('-')[0].toLowerCase();
+        return !!(resolved.voice && wantBase === gotBase);
+      };
+
       function _clearWatchdog() {
         if (_currentWatchdog) { clearTimeout(_currentWatchdog); _currentWatchdog = null; }
       }
@@ -208,8 +305,12 @@
         try {
           if (window.speechSynthesis.paused) window.speechSynthesis.resume();
           if (!_speechUnlocked) {
-            var u = new SpeechSynthesisUtterance('');
+            // Non-empty text + volume 0 is treated as a real utterance on
+            // iOS Safari; empty strings can be ignored silently and the
+            // "unlock" won't actually persist.
+            var u = new SpeechSynthesisUtterance(' ');
             u.volume = 0;
+            u.rate = 1.0;
             window.speechSynthesis.speak(u);
             _speechUnlocked = true;
           }
@@ -269,10 +370,13 @@
           try {
             // Unlock synthesis if not yet done
             if (!_speechUnlocked) {
-              var dummy = new SpeechSynthesisUtterance('');
+              var dummy = new SpeechSynthesisUtterance(' ');
               dummy.volume = 0;
               window.speechSynthesis.speak(dummy);
               _speechUnlocked = true;
+            }
+            if (window.speechSynthesis.paused) {
+              try { window.speechSynthesis.resume(); } catch(_) {}
             }
             var utter = new SpeechSynthesisUtterance(String(text));
             utter.rate   = 0.92;
@@ -280,14 +384,43 @@
             utter.volume = 1.0;
             var resolved = _resolveVoiceAndUtterLang(lang);
             utter.lang = resolved.utterLang;
-            if (resolved.voice) utter.voice = resolved.voice;
+            // Mobile engines (iOS Safari in particular) often refuse to play
+            // when a hard-coded desktop voice is attached; let the OS pick
+            // its default voice for the requested lang instead.
+            if (resolved.voice && !_isMobile) utter.voice = resolved.voice;
             _ttsSpeaking = true;
             utter.onend   = function() { if (_ttsSpeaking) _fireDone(); };
             utter.onerror  = function(e) {
-              console.warn('[EOS-Audio] TTS error:', e.error);
+              console.warn('[EOS-Audio] TTS error:', e && e.error);
               if (_ttsSpeaking) _fireDone();
             };
-            window.speechSynthesis.speak(utter);
+            // iOS/Safari: speaking synchronously right after cancel() is
+            // frequently dropped; give the engine a tick to settle.
+            var fire = function() {
+              try {
+                if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+                window.speechSynthesis.speak(utter);
+              } catch (err) {
+                console.warn('[EOS-Audio] speak() threw:', err);
+                if (_ttsSpeaking) _fireDone();
+                return;
+              }
+              // Mobile stall detector: if the engine hasn't started within
+              // ~500ms, resume + re-speak once to work around the known
+              // iOS Safari "silent utterance" bug.
+              if (_isMobile) {
+                setTimeout(function() {
+                  if (!_ttsSpeaking) return;
+                  try {
+                    if (!window.speechSynthesis.speaking) {
+                      window.speechSynthesis.resume();
+                      window.speechSynthesis.speak(utter);
+                    }
+                  } catch (_) {}
+                }, 500);
+              }
+            };
+            if (_isMobile) setTimeout(fire, 80); else fire();
             // Stuck-queue fallback only: start AFTER speak(); be conservative so onend
             // normally wins. Short watchdogs here caused the next eosSpeak to cancel()
             // mid-utterance and cut TTS (Dart queue advanced too early).
@@ -340,11 +473,10 @@
       };
 
       // ──────────────────────────────────────────────────────────────────
-      // 4. SPEECH RECOGNITION (STT)
+      // 4. SPEECH RECOGNITION (STT) — handled by the standalone bootstrap
+      // earlier in this file so it's immune to TTS engine errors.
+      // Only the speechSynthesis unlock listener remains here.
       // ──────────────────────────────────────────────────────────────────
-      var _recognition = null;
-      var _stoppedIntentionally = false;
-
       function _unlockSpeech() {
         if (_speechUnlocked || !window.speechSynthesis) return;
         try {
@@ -358,62 +490,6 @@
       }
       document.body.addEventListener('touchstart', _unlockSpeech, {once:true});
       document.body.addEventListener('click', _unlockSpeech, {once:true});
-
-      window.startSpeech = function(lang) {
-        try {
-          var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-          if (!SR) {
-            if (window._speechOnError) window._speechOnError('not_supported');
-            if (window._speechOnEnd)   window._speechOnEnd();
-            return;
-          }
-          if (_recognition) { try { _recognition.abort(); } catch(_) {} _recognition = null; }
-          _stoppedIntentionally = false;
-          var r = new SR();
-          r.lang            = lang || 'en-US';
-          r.continuous      = true;
-          r.interimResults  = true;
-          r.maxAlternatives = 1;
-          r.onstart      = function() { console.log('[STT] started'); };
-          r.onsoundstart = function() { if (window._speechOnSound) window._speechOnSound(); };
-          r.onspeechstart= function() { if (window._speechOnSound) window._speechOnSound(); };
-          r.onresult     = function(e) {
-            var t = '';
-            for (var i = e.resultIndex; i < e.results.length; ++i)
-              t += e.results[i][0].transcript;
-            if (t && window._speechOnResult) window._speechOnResult(t);
-          };
-          r.onerror = function(e) {
-            if (e.error === 'aborted' || e.error === 'no-speech') return;
-            if (e.error === 'network' && _stoppedIntentionally) return;
-            if (e.error === 'network') {
-              try { r.abort(); } catch(_) {}
-              setTimeout(function() {
-                if (!_stoppedIntentionally && window.startSpeech) window.startSpeech(lang || 'en-US');
-              }, 450);
-              return;
-            }
-            if (window._speechOnError) window._speechOnError(e.error || 'unknown');
-          };
-          r.onend = function() {
-            _recognition = null;
-            _stoppedIntentionally = false;
-            if (window._speechOnEnd) window._speechOnEnd();
-          };
-          r.start();
-          _recognition = r;
-        } catch(ex) {
-          if (window._speechOnError) window._speechOnError(String(ex));
-          if (window._speechOnEnd)   window._speechOnEnd();
-        }
-      };
-
-      window.stopSpeech = function() {
-        if (_recognition) {
-          _stoppedIntentionally = true;
-          try { _recognition.stop(); } catch(_) {}
-        }
-      };
 
       // Emergency Alarm Engine (Oscillator based to avoid asset loading issues)
       var _audioCtx = null;

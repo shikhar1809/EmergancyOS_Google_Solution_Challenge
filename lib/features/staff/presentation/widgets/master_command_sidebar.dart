@@ -4,6 +4,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/constants/india_ops_zones.dart';
+import '../../../../core/l10n/dashboard_l10n.dart';
 import '../../../../core/utils/fleet_unit_availability.dart';
 import '../../../../services/ops_hospital_service.dart';
 import '../../../../services/ops_zone_resource_catalog.dart';
@@ -75,7 +76,7 @@ class _MasterLiveOpsSidebarState extends State<MasterLiveOpsSidebar> {
                   Expanded(
                     child: _catChip(
                       _LiveOpsCategory.consignments,
-                      'SOS',
+                      context.opsTr('SOS'),
                       Icons.emergency_outlined,
                     ),
                   ),
@@ -83,7 +84,7 @@ class _MasterLiveOpsSidebarState extends State<MasterLiveOpsSidebar> {
                   Expanded(
                     child: _catChip(
                       _LiveOpsCategory.fleet,
-                      'Fleet',
+                      context.opsTr('Fleet'),
                       Icons.local_shipping_outlined,
                     ),
                   ),
@@ -95,7 +96,7 @@ class _MasterLiveOpsSidebarState extends State<MasterLiveOpsSidebar> {
                   Expanded(
                     child: _catChip(
                       _LiveOpsCategory.volunteers,
-                      'Volunteers',
+                      context.opsTr('Volunteers'),
                       Icons.groups_outlined,
                     ),
                   ),
@@ -103,7 +104,7 @@ class _MasterLiveOpsSidebarState extends State<MasterLiveOpsSidebar> {
                   Expanded(
                     child: _catChip(
                       _LiveOpsCategory.hospitals,
-                      'Hospitals',
+                      context.opsTr('Hospitals'),
                       Icons.local_hospital_outlined,
                     ),
                   ),

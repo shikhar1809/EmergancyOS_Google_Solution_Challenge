@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../../core/theme/app_colors.dart';
 import '../domain/admin_panel_access.dart';
 import '../../../services/ops_hospital_service.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 /// Hospital capacity editor — Medical sees only the hospital bound by their code; Master sees all.
 class HospitalInfoUpdateScreen extends StatefulWidget {
@@ -167,7 +168,7 @@ class _HospitalEditorCardState extends State<_HospitalEditorCard> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Hospital row updated')),
+        SnackBar(content: Text(context.opsTr('Hospital row updated'))),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -221,9 +222,7 @@ class _HospitalEditorCardState extends State<_HospitalEditorCard> {
               decoration: _deco('Trauma / notes (optional)'),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'Offered services',
-              style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w700, fontSize: 13),
+            Text(context.opsTr('Offered services'), style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w700, fontSize: 13),
             ),
             const SizedBox(height: 8),
             Wrap(
@@ -256,9 +255,7 @@ class _HospitalEditorCardState extends State<_HospitalEditorCard> {
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text(
-                'Has blood bank on-site',
-                style: TextStyle(color: Colors.white70, fontSize: 14),
+              title: Text(context.opsTr('Has blood bank on-site'), style: TextStyle(color: Colors.white70, fontSize: 14),
               ),
               value: _hasBloodBank,
               onChanged: (v) => setState(() => _hasBloodBank = v),
@@ -276,7 +273,7 @@ class _HospitalEditorCardState extends State<_HospitalEditorCard> {
                         height: 20,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
-                    : const Text('Save'),
+                    : Text(context.opsTr('Save')),
               ),
             ),
           ],

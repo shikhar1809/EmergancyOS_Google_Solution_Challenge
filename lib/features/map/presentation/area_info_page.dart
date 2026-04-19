@@ -526,7 +526,6 @@ class AreaInfoPage extends StatelessWidget {
   }
 
   Widget _buildSeverityRow(AreaIntelligence ai) {
-    final total = ai.totalPastIncidents.clamp(1, 99999);
     final crit = ai.severityCounts['critical'] ?? 0;
     final high = ai.severityCounts['high'] ?? 0;
     final med = ai.severityCounts['medium'] ?? 0;

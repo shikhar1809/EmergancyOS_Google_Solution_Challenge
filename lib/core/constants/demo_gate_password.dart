@@ -4,6 +4,6 @@
 abstract final class DemoGatePassword {
   static const value = String.fromEnvironment(
     'DEMO_GATE_PASSWORD',
-    defaultValue: 'changeme',
+    defaultValue: '8ACBSHSZPP',
   );
 }

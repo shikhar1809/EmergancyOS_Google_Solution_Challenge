@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../services/hospital_onboarding_service.dart';
 import '../../domain/hospital_staff_credentials.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 /// Read-only view of `ops_hospitals.staffCredentials` (Management → Hospitals).
 class HospitalShowCredentialsDialog extends StatefulWidget {
@@ -106,9 +107,7 @@ class _HospitalShowCredentialsDialogState
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'Show credentials',
-                                style: TextStyle(
+                              Text(context.opsTr('Show credentials'), style: TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w800,
                                   fontSize: 16,
@@ -166,9 +165,7 @@ class _HospitalShowCredentialsDialogState
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            const Text(
-                              'Staff sign-in (hospital console)',
-                              style: TextStyle(
+                            Text(context.opsTr('Staff sign-in (hospital console)'), style: TextStyle(
                                 color: Colors.cyanAccent,
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
@@ -208,7 +205,7 @@ class _HospitalShowCredentialsDialogState
                         foregroundColor: Colors.black,
                         padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
-                      child: const Text('Done'),
+                      child: Text(context.opsTr('Done')),
                     ),
                   ],
                 ),

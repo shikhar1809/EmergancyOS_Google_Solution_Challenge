@@ -108,8 +108,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     await DrillSessionPersistence.clear();
     await DrillEntryService.clearArmedMode();
     if (!context.mounted) return;
-    ref.read(drillSessionDashboardDemoProvider.notifier).state = false;
-    ref.read(drillVictimPracticeShellProvider.notifier).state = false;
+    ref.read(drillSessionDashboardDemoProvider.notifier).set(false);
+    ref.read(drillVictimPracticeShellProvider.notifier).set(false);
     await FirebaseAuth.instance.signOut();
     if (!context.mounted) return;
     context.go('/login');

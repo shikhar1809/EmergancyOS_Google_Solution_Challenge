@@ -8,7 +8,10 @@ import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../domain/admin_panel_access.dart';
+import '../../../services/incident_service.dart';
 import '../../../services/ops_hospital_service.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
+import '../../../core/utils/ems_workflow_labels.dart';
 
 /// Service ids for [OpsHospitalRow.offeredServices] — allocators match incidents to these.
 const kLiveOpsServiceIds = <String>[
@@ -54,26 +57,26 @@ String _acceptedAtDisplayLabel(Timestamp? acceptedAt) {
   return DateFormat.MMMd().add_Hm().format(t);
 }
 
-String liveOpsServiceLabel(String id) {
+String liveOpsServiceLabel(BuildContext context, String id) {
   switch (id) {
     case 'icu':
-      return 'ICU';
+      return context.opsTr('ICU');
     case 'ent':
-      return 'ENT';
+      return context.opsTr('ENT');
     case 'blood_bank':
-      return 'Blood bank';
+      return context.opsTr('Blood bank');
     case 'trauma_support':
-      return 'Trauma support';
+      return context.opsTr('Trauma support');
     case 'child_care':
-      return 'Child care';
+      return context.opsTr('Child care');
     case 'blood_availability':
-      return 'Blood availability';
+      return context.opsTr('Blood availability');
     case 'burn_unit':
-      return 'Burn unit';
+      return context.opsTr('Burn unit');
     case 'ventilator_available':
-      return 'Ventilators';
+      return context.opsTr('Ventilators');
     case 'cardiac_cathlab':
-      return 'Cardiac cath lab';
+      return context.opsTr('Cardiac cath lab');
     default:
       if (id.isEmpty) return id;
       return id[0].toUpperCase() + id.substring(1);
@@ -91,9 +94,9 @@ class HospitalLiveOperationsScreen extends StatelessWidget {
     final bound = (access.boundHospitalDocId ?? '').trim();
     final scopeNote = access.role == AdminConsoleRole.medical
         ? (bound.isEmpty
-            ? 'No hospital ID bound — sign in with a facility document ID.'
-            : 'Facility $bound')
-        : 'Medical console only';
+            ? context.opsTr('No hospital ID bound — sign in with a facility document ID.')
+            : context.opsTr('Facility {bound}').replaceAll('{bound}', bound))
+        : context.opsTr('Medical console only');
 
     return Scaffold(
       primary: false,
@@ -104,7 +107,7 @@ class HospitalLiveOperationsScreen extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
             child: Text(
-              'Live Operations',
+              context.opsTr('Live Operations'),
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.w800,
@@ -145,21 +148,63 @@ class HospitalLiveOperationsScreen extends StatelessWidget {
                   }
                 }
                 if (rows.isEmpty) {
-                  return const Center(
+                  return Center(
                     child: Text(
-                      'No hospital rows for your scope.',
-                      style: TextStyle(color: Colors.white38),
+                      context.opsTr('No hospital rows for your scope.'),
+                      style: const TextStyle(color: Colors.white38),
                     ),
                   );
                 }
                 final hospitalIds = rows.map((r) => r.id).toList();
-                return ListView(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  children: [
-                    _IncomingEmergencyAlerts(hospitalIds: hospitalIds),
-                    for (final r in rows) _LiveOperationsFacilityCard(row: r),
-                    _AcceptedConsignmentSection(hospitalIds: hospitalIds),
+                final primaryChildren = <Widget>[
+                  _HospitalFleetOnCallStrip(hospitalIds: hospitalIds),
+                  _IncomingEmergencyAlerts(hospitalIds: hospitalIds),
+                  for (final r in rows) ...[
+                    HospitalOverviewCapacitySection(
+                      hospitalDocId: r.id,
+                      initiallyExpanded: true,
+                    ),
+                    _LiveOperationsFacilityCard(row: r),
                   ],
+                ];
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isWide = constraints.maxWidth >= 1100;
+                    if (!isWide) {
+                      return ListView(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        children: [
+                          ...primaryChildren,
+                          _AcceptedConsignmentSection(
+                            hospitalIds: hospitalIds,
+                          ),
+                        ],
+                      );
+                    }
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          child: ListView(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 8, 16),
+                            children: primaryChildren,
+                          ),
+                        ),
+                        Container(
+                          width: 1,
+                          margin: const EdgeInsets.symmetric(vertical: 12),
+                          color: Colors.white.withValues(alpha: 0.06),
+                        ),
+                        SizedBox(
+                          width: 360,
+                          child: _LiveOpsRightRail(hospitalIds: hospitalIds),
+                        ),
+                      ],
+                    );
+                  },
                 );
               },
             ),
@@ -272,7 +317,7 @@ class _HospitalCapacityCardState extends State<HospitalCapacityCard> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Capacity updated')),
+        SnackBar(content: Text(context.opsTr('Capacity updated'))),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -304,9 +349,7 @@ class _HospitalCapacityCardState extends State<HospitalCapacityCard> {
               style: const TextStyle(color: Colors.white38, fontSize: 12),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'Bed capacity',
-              style: TextStyle(
+            Text(context.opsTr('Bed capacity'), style: TextStyle(
                 color: Colors.white70,
                 fontWeight: FontWeight.w700,
                 fontSize: 13,
@@ -320,7 +363,7 @@ class _HospitalCapacityCardState extends State<HospitalCapacityCard> {
                     controller: _avail,
                     keyboardType: TextInputType.number,
                     style: const TextStyle(color: Colors.white),
-                    decoration: _capacityDeco('Beds available'),
+                    decoration: _capacityDeco(context.opsTr('Beds available')),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -329,7 +372,7 @@ class _HospitalCapacityCardState extends State<HospitalCapacityCard> {
                     controller: _total,
                     keyboardType: TextInputType.number,
                     style: const TextStyle(color: Colors.white),
-                    decoration: _capacityDeco('Beds total'),
+                    decoration: _capacityDeco(context.opsTr('Beds total')),
                   ),
                 ),
               ],
@@ -339,12 +382,10 @@ class _HospitalCapacityCardState extends State<HospitalCapacityCard> {
               controller: _note,
               maxLines: 2,
               style: const TextStyle(color: Colors.white70, fontSize: 13),
-              decoration: _capacityDeco('Trauma / capacity notes'),
+              decoration: _capacityDeco(context.opsTr('Trauma / capacity notes')),
             ),
             const SizedBox(height: 20),
-            const Text(
-              'Doctor availability',
-              style: TextStyle(
+            Text(context.opsTr('Doctor availability'), style: TextStyle(
                 color: Colors.white70,
                 fontWeight: FontWeight.w700,
                 fontSize: 13,
@@ -358,7 +399,7 @@ class _HospitalCapacityCardState extends State<HospitalCapacityCard> {
                     controller: _doctors,
                     keyboardType: TextInputType.number,
                     style: const TextStyle(color: Colors.white),
-                    decoration: _capacityDeco('Doctors on duty'),
+                    decoration: _capacityDeco(context.opsTr('Doctors on duty')),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -367,15 +408,13 @@ class _HospitalCapacityCardState extends State<HospitalCapacityCard> {
                     controller: _specialists,
                     keyboardType: TextInputType.number,
                     style: const TextStyle(color: Colors.white),
-                    decoration: _capacityDeco('Specialists on call'),
+                    decoration: _capacityDeco(context.opsTr('Specialists on call')),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 20),
-            const Text(
-              'Blood bank',
-              style: TextStyle(
+            Text(context.opsTr('Blood bank'), style: TextStyle(
                 color: Colors.white70,
                 fontWeight: FontWeight.w700,
                 fontSize: 13,
@@ -386,14 +425,12 @@ class _HospitalCapacityCardState extends State<HospitalCapacityCard> {
               controller: _bloodUnits,
               keyboardType: TextInputType.number,
               style: const TextStyle(color: Colors.white),
-              decoration: _capacityDeco('Blood units available (approx.)'),
+              decoration: _capacityDeco(context.opsTr('Blood units available (approx.)')),
             ),
             const SizedBox(height: 8),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text(
-                'Has blood bank on-site',
-                style: TextStyle(color: Colors.white70, fontSize: 14),
+              title: Text(context.opsTr('Has blood bank on-site'), style: TextStyle(color: Colors.white70, fontSize: 14),
               ),
               value: _hasBloodBank,
               onChanged: (v) => setState(() => _hasBloodBank = v),
@@ -414,7 +451,7 @@ class _HospitalCapacityCardState extends State<HospitalCapacityCard> {
                           color: Colors.white,
                         ),
                       )
-                    : const Text('Save capacity'),
+                    : Text(context.opsTr('Save capacity')),
               ),
             ),
           ],
@@ -433,11 +470,17 @@ class _HospitalCapacityCardState extends State<HospitalCapacityCard> {
       );
 }
 
-/// Expandable block for the medical Overview (command center) body.
+/// Expandable block for the medical Overview (command center) body, or inline
+/// on Hospital Live Operations (beds sync to Firestore → analytics "My beds").
 class HospitalOverviewCapacitySection extends StatelessWidget {
-  const HospitalOverviewCapacitySection({super.key, required this.hospitalDocId});
+  const HospitalOverviewCapacitySection({
+    super.key,
+    required this.hospitalDocId,
+    this.initiallyExpanded = false,
+  });
 
   final String hospitalDocId;
+  final bool initiallyExpanded;
 
   @override
   Widget build(BuildContext context) {
@@ -473,7 +516,7 @@ class HospitalOverviewCapacitySection extends StatelessWidget {
           return Theme(
             data: Theme.of(context).copyWith(dividerColor: Colors.white24),
             child: ExpansionTile(
-              initiallyExpanded: false,
+              initiallyExpanded: initiallyExpanded,
               tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               collapsedShape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -485,17 +528,17 @@ class HospitalOverviewCapacitySection extends StatelessWidget {
               ),
               backgroundColor: Colors.black.withValues(alpha: 0.45),
               collapsedBackgroundColor: Colors.black.withValues(alpha: 0.35),
-              title: const Text(
-                'Hospital capacity & staffing',
-                style: TextStyle(
+              title: Text(context.opsTr('Hospital capacity & staffing'), style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
                   fontSize: 14,
                 ),
               ),
-              subtitle: const Text(
-                'Beds, staffing, and blood — edits apply to the allocator grid.',
-                style: TextStyle(color: Colors.white54, fontSize: 11),
+              subtitle: Text(
+                context.opsTr(
+                  'Beds, staffing, and blood — saved to this facility and reflected in Analytics (My beds).',
+                ),
+                style: const TextStyle(color: Colors.white54, fontSize: 11),
               ),
               children: [
                 Padding(
@@ -560,7 +603,7 @@ class _LiveOperationsFacilityCardState extends State<_LiveOperationsFacilityCard
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Capabilities saved')),
+        SnackBar(content: Text(context.opsTr('Capabilities saved'))),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -589,17 +632,13 @@ class _LiveOperationsFacilityCardState extends State<_LiveOperationsFacilityCard
             const SizedBox(height: 8),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text(
-                'Public map listing (online)',
-                style: TextStyle(
+              title: Text(context.opsTr('Public map listing (online)'), style: TextStyle(
                   color: Colors.white70,
                   fontWeight: FontWeight.w700,
                   fontSize: 13,
                 ),
               ),
-              subtitle: const Text(
-                'When off, the main grid map shows this hospital as offline.',
-                style: TextStyle(color: Colors.white38, fontSize: 11),
+              subtitle: Text(context.opsTr('When off, the main grid map shows this hospital as offline.'), style: TextStyle(color: Colors.white38, fontSize: 11),
               ),
               value: _mapListingOnline,
               onChanged: (v) async {
@@ -611,31 +650,33 @@ class _LiveOperationsFacilityCardState extends State<_LiveOperationsFacilityCard
                   );
                   if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(v ? 'Map: online' : 'Map: offline')),
+                    SnackBar(
+                      content: Text(
+                        v ? context.opsTr('Map: online') : context.opsTr('Map: offline'),
+                      ),
+                    ),
                   );
                 } catch (e) {
                   if (mounted) setState(() => _mapListingOnline = !v);
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Update failed: $e')),
+                      SnackBar(
+                        content: Text('${context.opsTr('Update failed.')} $e'),
+                      ),
                     );
                   }
                 }
               },
             ),
             const SizedBox(height: 12),
-            const Text(
-              'Capabilities for allocators',
-              style: TextStyle(
+            Text(context.opsTr('Capabilities for allocators'), style: TextStyle(
                 color: Colors.white70,
                 fontWeight: FontWeight.w700,
                 fontSize: 13,
               ),
             ),
             const SizedBox(height: 4),
-            const Text(
-              'Select specialties this facility can take (e.g. child care / pediatrics for pediatric referrals; cardiology & cath lab for cardiac).',
-              style: TextStyle(color: Colors.white38, fontSize: 11),
+            Text(context.opsTr('Select specialties this facility can take (e.g. child care / pediatrics for pediatric referrals; cardiology & cath lab for cardiac).'), style: TextStyle(color: Colors.white38, fontSize: 11),
             ),
             const SizedBox(height: 10),
             Wrap(
@@ -644,7 +685,7 @@ class _LiveOperationsFacilityCardState extends State<_LiveOperationsFacilityCard
               children: kLiveOpsServiceIds.map((id) {
                 final selected = _selectedServices.contains(id);
                 return FilterChip(
-                  label: Text(liveOpsServiceLabel(id)),
+                  label: Text(liveOpsServiceLabel(context, id)),
                   selected: selected,
                   onSelected: (v) {
                     setState(() {
@@ -683,12 +724,139 @@ class _LiveOperationsFacilityCardState extends State<_LiveOperationsFacilityCard
                           color: Colors.white,
                         ),
                       )
-                    : const Text('Save capabilities'),
+                    : Text(context.opsTr('Save capabilities')),
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// While a fleet unit has accepted an EMS run for an incident consigned to this hospital,
+/// surface **On call** until the response cycle completes (hospital arrival / archive).
+class _HospitalFleetOnCallStrip extends StatelessWidget {
+  const _HospitalFleetOnCallStrip({required this.hospitalIds});
+
+  final List<String> hospitalIds;
+
+  static String _phaseLabel(BuildContext context, String raw) {
+    switch (raw.trim()) {
+      case 'inbound':
+        return context.opsTr('En route');
+      case 'on_scene':
+        return context.opsTr('On scene');
+      case 'returning':
+        return context.opsTr('Returning');
+      default:
+        return raw.isEmpty ? '—' : raw;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (hospitalIds.isEmpty) return const SizedBox.shrink();
+    final take = hospitalIds.take(10).toList();
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('ops_incident_hospital_assignments')
+          .where('acceptedHospitalId', whereIn: take)
+          .where('dispatchStatus', isEqualTo: 'accepted')
+          .snapshots(),
+      builder: (context, assignSnap) {
+        if (assignSnap.hasError || !assignSnap.hasData) return const SizedBox.shrink();
+        final assignIds = assignSnap.data!.docs.map((d) => d.id).toSet();
+        if (assignIds.isEmpty) return const SizedBox.shrink();
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: FirebaseFirestore.instance.collection('sos_incidents').limit(200).snapshots(),
+          builder: (context, incSnap) {
+            if (!incSnap.hasData) return const SizedBox.shrink();
+            final incidents = incSnap.data!.docs.map(SosIncident.fromFirestore).toList();
+            final active = incidents.where((i) {
+              if (!assignIds.contains(i.id)) return false;
+              if ((i.emsAcceptedBy ?? '').trim().isEmpty) return false;
+              final ph = (i.emsWorkflowPhase ?? '').trim();
+              if (!const {'inbound', 'on_scene', 'returning'}.contains(ph)) return false;
+              if (i.status == IncidentStatus.resolved || i.status == IncidentStatus.blocked) return false;
+              return true;
+            }).toList()
+              ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+            if (active.isEmpty) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    context.opsTr('Fleet on call (EMS)'),
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.85),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ...active.take(6).map(
+                    (i) {
+                      final idShort = i.id.length > 18 ? '${i.id.substring(0, 16)}…' : i.id;
+                      final ph = _phaseLabel(context, i.emsWorkflowPhase ?? '');
+                      return Card(
+                        color: const Color(0xFF1C2A3A),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF238636).withValues(alpha: 0.35),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xFF79C0FF).withValues(alpha: 0.45)),
+                                ),
+                                child: Text(context.opsTr('ON CALL'), style: TextStyle(
+                                    color: Color(0xFF79C0FF),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 0.6,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      idShort,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '$ph · ${i.type}',
+                                      style: const TextStyle(color: Colors.white54, fontSize: 11),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -785,8 +953,8 @@ class _FlashingAlertCardState extends State<_FlashingAlertCard>
       if (hospId.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Missing notified hospital for this assignment.'),
+            SnackBar(
+              content: Text(context.opsTr('Missing notified hospital for this assignment.')),
               backgroundColor: AppColors.primaryDanger,
             ),
           );
@@ -818,8 +986,8 @@ class _FlashingAlertCardState extends State<_FlashingAlertCard>
       if (hospId.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Missing notified hospital for this assignment.'),
+            SnackBar(
+              content: Text(context.opsTr('Missing notified hospital for this assignment.')),
               backgroundColor: AppColors.primaryDanger,
             ),
           );
@@ -933,7 +1101,7 @@ class _FlashingAlertCardState extends State<_FlashingAlertCard>
                 child: FilledButton.icon(
                   onPressed: _acting ? null : _accept,
                   icon: const Icon(Icons.check_circle_rounded, size: 18),
-                  label: const Text('ACCEPT', style: TextStyle(fontWeight: FontWeight.w900)),
+                  label: Text(context.opsTr('ACCEPT'), style: TextStyle(fontWeight: FontWeight.w900)),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF2E7D32),
                     foregroundColor: Colors.white,
@@ -947,7 +1115,7 @@ class _FlashingAlertCardState extends State<_FlashingAlertCard>
                 child: FilledButton.icon(
                   onPressed: _acting ? null : _refer,
                   icon: const Icon(Icons.swap_horiz_rounded, size: 18),
-                  label: const Text('REFER', style: TextStyle(fontWeight: FontWeight.w900)),
+                  label: Text(context.opsTr('REFER'), style: TextStyle(fontWeight: FontWeight.w900)),
                   style: FilledButton.styleFrom(
                     backgroundColor: Colors.amber.shade800,
                     foregroundColor: Colors.white,
@@ -964,9 +1132,156 @@ class _FlashingAlertCardState extends State<_FlashingAlertCard>
   }
 }
 
-class _AcceptedConsignmentSection extends StatelessWidget {
-  const _AcceptedConsignmentSection({required this.hospitalIds});
+/// Live EMS phase from `sos_incidents` (same labels as fleet operator strip).
+class _ActiveConsignmentHospitalCard extends StatelessWidget {
+  const _ActiveConsignmentHospitalCard({required this.assignmentDoc});
+
+  final QueryDocumentSnapshot<Map<String, dynamic>> assignmentDoc;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = assignmentDoc.data();
+    final incId = assignmentDoc.id;
+    final hospName = (d['acceptedHospitalName'] as String?)?.trim() ?? '—';
+    final hospCode = (d['acceptedHospitalId'] as String?)?.trim() ?? '';
+    final acceptedAt = d['acceptedAt'];
+    final acceptedLabel = acceptedAt is Timestamp ? _acceptedAtDisplayLabel(acceptedAt) : '';
+    final reqSvc = (d['requiredServices'] as List?)?.map((e) => e.toString()).join(', ') ?? '';
+    final ambStatus = (d['ambulanceDispatchStatus'] as String?)?.replaceAll('_', ' ') ?? '';
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('sos_incidents').doc(incId).snapshots(),
+      builder: (context, incSnap) {
+        final phase = (incSnap.data?.data()?['emsWorkflowPhase'] as String?)?.trim() ?? '';
+        final emsLine = phase.isEmpty ? 'Not started' : emsWorkflowPhaseShortLabel(phase);
+        return Card(
+          color: AppColors.slate800,
+          margin: const EdgeInsets.only(bottom: 8),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.greenAccent.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        context.opsTr('ACCEPTED'),
+                        style: const TextStyle(
+                          color: Colors.greenAccent,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Incident: ${incId.length > 16 ? '${incId.substring(0, 14)}...' : incId}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Hospital: $hospName',
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
+                ),
+                if (hospCode.isNotEmpty)
+                  Text(
+                    'Hospital code: $hospCode',
+                    style: const TextStyle(color: Colors.cyanAccent, fontSize: 10, fontWeight: FontWeight.w600),
+                  ),
+                const SizedBox(height: 2),
+                Text(
+                  'EMS: $emsLine',
+                  style: const TextStyle(color: Color(0xFF79C0FF), fontSize: 11, fontWeight: FontWeight.w700),
+                ),
+                if (reqSvc.isNotEmpty)
+                  Text(
+                    'Services: $reqSvc',
+                    style: const TextStyle(color: Colors.white38, fontSize: 10),
+                  ),
+                if (ambStatus.isNotEmpty)
+                  Text(
+                    'Ambulance: $ambStatus',
+                    style: const TextStyle(color: Colors.white38, fontSize: 10),
+                  ),
+                if (acceptedLabel.isNotEmpty)
+                  Text(
+                    'Accepted $acceptedLabel',
+                    style: const TextStyle(color: Colors.white38, fontSize: 10),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Right-side rail shown on wide viewports; keeps active consignments visible
+/// alongside the capacity/alert columns instead of burying them at the bottom.
+class _LiveOpsRightRail extends StatelessWidget {
+  const _LiveOpsRightRail({required this.hospitalIds});
+
   final List<String> hospitalIds;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(8, 8, 16, 16),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+          child: Row(
+            children: [
+              Icon(
+                Icons.local_shipping_outlined,
+                size: 16,
+                color: Colors.white.withValues(alpha: 0.7),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                context.opsTr('Active consignments'),
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.9),
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
+          ),
+        ),
+        _AcceptedConsignmentSection(
+          hospitalIds: hospitalIds,
+          showHeader: false,
+        ),
+      ],
+    );
+  }
+}
+
+class _AcceptedConsignmentSection extends StatelessWidget {
+  const _AcceptedConsignmentSection({
+    required this.hospitalIds,
+    this.showHeader = true,
+  });
+  final List<String> hospitalIds;
+  final bool showHeader;
 
   static const _activeWindow = Duration(hours: 1);
 
@@ -1004,97 +1319,24 @@ class _AcceptedConsignmentSection extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(
-                'Active consignments',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.85),
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14,
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            ...docs.take(8).map((doc) {
-              final d = doc.data();
-              final incId = doc.id;
-              final hospName = (d['acceptedHospitalName'] as String?)?.trim() ?? '—';
-              final acceptedAt = d['acceptedAt'];
-              final acceptedLabel = acceptedAt is Timestamp
-                  ? _acceptedAtDisplayLabel(acceptedAt)
-                  : '';
-              final reqSvc = (d['requiredServices'] as List?)
-                      ?.map((e) => e.toString())
-                      .join(', ') ??
-                  '';
-              final ambStatus =
-                  (d['ambulanceDispatchStatus'] as String?)?.replaceAll('_', ' ') ?? '';
-              return Card(
-                color: AppColors.slate800,
-                margin: const EdgeInsets.only(bottom: 8),
-                child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.greenAccent.withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Text(
-                              'ACCEPTED',
-                              style: TextStyle(
-                                color: Colors.greenAccent,
-                                fontSize: 9,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Incident: ${incId.length > 16 ? '${incId.substring(0, 14)}...' : incId}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Hospital: $hospName',
-                        style: const TextStyle(color: Colors.white70, fontSize: 11),
-                      ),
-                      if (reqSvc.isNotEmpty)
-                        Text(
-                          'Services: $reqSvc',
-                          style: const TextStyle(color: Colors.white38, fontSize: 10),
-                        ),
-                      if (ambStatus.isNotEmpty)
-                        Text(
-                          'Ambulance: $ambStatus',
-                          style: const TextStyle(color: Colors.white38, fontSize: 10),
-                        ),
-                      if (acceptedLabel.isNotEmpty)
-                        Text(
-                          'Accepted $acceptedLabel',
-                          style: const TextStyle(color: Colors.white38, fontSize: 10),
-                        ),
-                    ],
+            if (showHeader) ...[
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  context.opsTr('Active consignments'),
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.85),
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
                   ),
                 ),
-              );
-            }),
+              ),
+              const SizedBox(height: 8),
+            ],
+            ...docs
+                .take(8)
+                .map((doc) => _ActiveConsignmentHospitalCard(assignmentDoc: doc)),
           ],
         );
       },

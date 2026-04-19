@@ -14,7 +14,6 @@ import '../../../core/maps/eos_hybrid_map.dart';
 import '../../../core/maps/ops_map_controller.dart';
 import '../../../core/constants/india_ops_zones.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/utils/ops_analytics_hex_grid.dart';
 import '../../../core/utils/ops_map_markers.dart';
 import '../../../core/utils/osrm_route_util.dart';
 import '../../../core/utils/fleet_map_icons.dart';
@@ -23,12 +22,17 @@ import '../../../services/incident_service.dart';
 import '../../../services/ops_zone_resource_catalog.dart';
 import '../../../services/volunteer_presence_service.dart';
 import '../../../services/ops_analytics_derived.dart';
+import '../../../services/ops_hospital_service.dart';
+import '../../../services/environmental_data_service.dart';
 import '../../../services/ops_incident_analytics_digest.dart';
 import '../domain/admin_panel_access.dart';
 import '../domain/command_center_accent.dart';
 import 'liveops_feedback_dashboard.dart';
 import 'widgets/command_center_shared_widgets.dart';
+import 'widgets/hospital_analytics_inbound_rail.dart';
+import 'widgets/ops_analytics_side_panel.dart';
 import 'widgets/ops_analytics_trend_chart.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 enum _AnalyticsCategory { sos, fleet, hospitals, volunteers, feedback }
 
@@ -53,6 +57,8 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
   Timer? _analyticsSimTimer;
   double _analyticsMapZoom = 11.0;
   _AnalyticsCategory _analyticsCategory = _AnalyticsCategory.sos;
+  /// Medical analytics: selected inbound assignment (`ops_incident_hospital_assignments` doc id).
+  String? _selectedInboundIncidentId;
   OpsMapController? _analyticsMapCtl;
   bool _analyticsDetailPanelOpen = true;
   bool _hexSelectMode = false;
@@ -62,8 +68,16 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _volunteerDutySub;
   final List<QueryDocumentSnapshot<Map<String, dynamic>>> _volunteerDutyDocs =
       [];
+  StreamSubscription<List<OpsHospitalRow>>? _allOpsHospitalsSub;
+  List<OpsHospitalRow> _allOpsHospitals = [];
+  HexEnvironmentalData? _selectedHexEnvData;
+  bool _isLoadingEnvData = false;
   bool _analyticsShowOpsHexGrid = true;
+  // ignore: unused_field
   EmergencyHexZoneModel? _cachedOpsCoverageHexModel;
+  /// Flat-top hex cells (same math as Live Ops overview) used for tappable selection.
+  Map<HexAxial, HexCellCoverage>? _cachedHexCells;
+  LatLng? _cachedHexCenter;
 
   Color get _accent => CommandCenterAccent.forRole(widget.access.role).primary;
 
@@ -76,20 +90,35 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
     final z = _zone;
     if (z == null) return;
     final coverM = _analyticsOpsHexCoverM(z);
+    final hospitals = OpsZoneResourceCatalog.hospitalsInZoneMerged(z, _allOpsHospitals);
+    final volunteerPositions = OpsZoneResourceCatalog.volunteersInZone(
+      _volunteerDutyDocs,
+      z,
+    ).map((v) => LatLng(v.lat, v.lng)).toList();
+    // Cache the raw cell map for tappable polygon rendering in analytics.
+    _cachedHexCells = buildHexCellCoverageMap(
+      center: z.center,
+      coverRadiusM: coverM,
+      hospitals: hospitals,
+      volunteerPositions: volunteerPositions,
+    );
+    _cachedHexCenter = z.center;
+    // Keep the model for zone coverage stats displayed in the side panel.
     _cachedOpsCoverageHexModel = buildEmergencyHexZones(
       center: z.center,
       coverRadiusM: coverM,
-      hospitals: OpsZoneResourceCatalog.hospitalsInZone(z),
-      volunteerPositions: OpsZoneResourceCatalog.volunteersInZone(
-        _volunteerDutyDocs,
-        z,
-      ).map((v) => LatLng(v.lat, v.lng)).toList(),
+      hospitals: hospitals,
+      volunteerPositions: volunteerPositions,
+      useMainAppHospitalDensityColors: true,
     );
   }
 
   @override
   void initState() {
     super.initState();
+    if (widget.access.role == AdminConsoleRole.medical) {
+      _analyticsCategory = _AnalyticsCategory.hospitals;
+    }
     _volunteerDutySub = VolunteerPresenceService.watchOnDutyUsers().listen((
       snap,
     ) {
@@ -98,6 +127,13 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
         _volunteerDutyDocs
           ..clear()
           ..addAll(snap.docs);
+        _rebuildAnalyticsOpsHex();
+      });
+    });
+    _allOpsHospitalsSub = OpsHospitalService.watchHospitals().listen((rows) {
+      if (!mounted) return;
+      setState(() {
+        _allOpsHospitals = rows;
         _rebuildAnalyticsOpsHex();
       });
     });
@@ -120,6 +156,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
   @override
   void dispose() {
     _volunteerDutySub?.cancel();
+    _allOpsHospitalsSub?.cancel();
     _analyticsSimTimer?.cancel();
     _analyticsMapCtl?.dispose();
     super.dispose();
@@ -131,12 +168,16 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
     LatLng origin,
     double hexSize,
   ) {
-    final p = OpsAnalyticsHexGrid.parseKey(hexKey);
     return incidents
         .where((e) {
-          final h =
-              OpsAnalyticsHexGrid.hexKeyForLatLng(e.liveVictimPin, origin, hexSize);
-          return h.q == p.q && h.r == p.r;
+          final h = volunteerToHex(
+            hexSize,
+            origin.latitude,
+            origin.longitude,
+            e.liveVictimPin.latitude,
+            e.liveVictimPin.longitude,
+          );
+          return h.storageKey == hexKey;
         })
         .toList();
   }
@@ -156,10 +197,30 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
     double hexSize,
     String key,
   ) async {
-    final h = OpsAnalyticsHexGrid.parseKey(key);
-    final target =
-        OpsAnalyticsHexGrid.centerForHex(h.q, h.r, zone.center, hexSize);
+    final h = HexAxial.tryParseStorageKey(key);
+    if (h == null) return;
+    final pts = hexVerticesLatLng(zone.center, hexSize, h);
+    if (pts.isEmpty) return;
+    double lat = 0, lng = 0;
+    for (final p in pts) {
+      lat += p.latitude;
+      lng += p.longitude;
+    }
+    final target = LatLng(lat / pts.length, lng / pts.length);
+    if (mounted) {
+      setState(() {
+        _isLoadingEnvData = true;
+        _selectedHexEnvData = null;
+      });
+    }
     await _resetAnalyticsMapCamera(target, 14.4);
+    final envData = await EnvironmentalDataService.fetchForLocation(target);
+    if (mounted) {
+      setState(() {
+        _isLoadingEnvData = false;
+        _selectedHexEnvData = envData;
+      });
+    }
   }
 
   void _clearHexSelection(IndiaOpsZone zone, LatLng mapCenter, double defaultZoom) {
@@ -167,6 +228,8 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
       _hexSelectMode = false;
       _pendingHexKey = null;
       _confirmedHexKey = null;
+      _isLoadingEnvData = false;
+      _selectedHexEnvData = null;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_resetAnalyticsMapCamera(mapCenter, defaultZoom));
@@ -178,14 +241,33 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
     if (!zone.containsLatLng(pos)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Tap inside ${zone.label}.'),
+          content: Text(
+            context.opsTr('Tap inside {zone}.').replaceAll('{zone}', zone.label),
+          ),
           backgroundColor: AppColors.slate700,
         ),
       );
       return;
     }
-    final h = OpsAnalyticsHexGrid.hexKeyForLatLng(pos, zone.center, hexSize);
-    setState(() => _pendingHexKey = '${h.q},${h.r}');
+    final h = volunteerToHex(
+      hexSize,
+      zone.center.latitude,
+      zone.center.longitude,
+      pos.latitude,
+      pos.longitude,
+    );
+    if (_cachedHexCells?.containsKey(h) == true) {
+      setState(() => _pendingHexKey = h.storageKey);
+    } else {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.opsTr('Tap a highlighted ops coverage cell.')),
+          backgroundColor: AppColors.slate700,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   Widget _analyticsChip(_AnalyticsCategory c, String label, IconData icon) {
@@ -221,7 +303,23 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
     );
   }
 
-  Widget _analyticsCategoryChips() {
+  Widget _analyticsCategoryChips(BuildContext context) {
+    if (widget.access.role == AdminConsoleRole.medical) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: _analyticsChip(
+                _AnalyticsCategory.hospitals,
+                context.opsTr('Hospitals'),
+                Icons.local_hospital_outlined,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
       child: Column(
@@ -231,7 +329,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
               Expanded(
                 child: _analyticsChip(
                   _AnalyticsCategory.sos,
-                  'SOS',
+                  context.opsTr('SOS'),
                   Icons.emergency_outlined,
                 ),
               ),
@@ -239,7 +337,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
               Expanded(
                 child: _analyticsChip(
                   _AnalyticsCategory.fleet,
-                  'Fleet',
+                  context.opsTr('Fleet'),
                   Icons.local_shipping_outlined,
                 ),
               ),
@@ -251,7 +349,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
               Expanded(
                 child: _analyticsChip(
                   _AnalyticsCategory.hospitals,
-                  'Hospitals',
+                  context.opsTr('Hospitals'),
                   Icons.local_hospital_outlined,
                 ),
               ),
@@ -259,7 +357,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
               Expanded(
                 child: _analyticsChip(
                   _AnalyticsCategory.volunteers,
-                  'Volunteers',
+                  context.opsTr('Volunteers'),
                   Icons.groups_outlined,
                 ),
               ),
@@ -272,7 +370,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                 Expanded(
                   child: _analyticsChip(
                     _AnalyticsCategory.feedback,
-                    'Feedback',
+                    context.opsTr('Feedback'),
                     Icons.feedback_outlined,
                   ),
                 ),
@@ -284,24 +382,32 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
     );
   }
 
-  Widget _analyticsStatusSection(int activeN, int inZoneN) {
+  Widget _analyticsStatusSection(BuildContext context, int activeN, int inZoneN) {
     final hint = switch (_analyticsCategory) {
-      _AnalyticsCategory.sos =>
-        'All SOS incidents, hex density, EMS mix, and triage in the main pane.',
-      _AnalyticsCategory.fleet =>
-        'Dispatch and EMS workflow emphasis — map still shows live pins.',
-      _AnalyticsCategory.hospitals =>
-        'Hotspots, triage severity, and SMS-linked cases.',
-      _AnalyticsCategory.volunteers =>
-        'Volunteer attachment counts and responder lines on the map.',
-      _AnalyticsCategory.feedback =>
-        'Post-incident ratings and comments from resolved SOS flows.',
+      _AnalyticsCategory.sos => context.opsTr(
+          'All SOS incidents, hex density, EMS mix, and triage in the main pane.',
+        ),
+      _AnalyticsCategory.fleet => context.opsTr(
+          'Dispatch and EMS workflow emphasis — map still shows live pins.',
+        ),
+      _AnalyticsCategory.hospitals => context.opsTr(
+          'Hotspots, triage severity, and SMS-linked cases.',
+        ),
+      _AnalyticsCategory.volunteers => context.opsTr(
+          'Volunteer attachment counts and responder lines on the map.',
+        ),
+      _AnalyticsCategory.feedback => context.opsTr(
+          'Post-incident ratings and comments from resolved SOS flows.',
+        ),
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '$activeN active · $inZoneN in zone',
+          context
+              .opsTr('{active} active · {in_zone} in zone')
+              .replaceAll('{active}', '$activeN')
+              .replaceAll('{in_zone}', '$inZoneN'),
           textAlign: TextAlign.start,
           style: const TextStyle(
             color: Colors.white54,
@@ -323,10 +429,10 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
     );
   }
 
-  Map<String, int> _typeHistogram(List<SosIncident> active) {
+  Map<String, int> _typeHistogram(BuildContext context, List<SosIncident> active) {
     final m = <String, int>{};
     for (final e in active) {
-      final t = e.type.trim().isEmpty ? 'Unknown' : e.type.trim();
+      final t = e.type.trim().isEmpty ? context.opsTr('Unknown') : e.type.trim();
       m[t] = (m[t] ?? 0) + 1;
     }
     return m;
@@ -335,16 +441,18 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
   @override
   Widget build(BuildContext context) {
     if (!widget.access.canUseAnalytics) {
-      return const Scaffold(
+      return Scaffold(
         primary: false,
         backgroundColor: AppColors.slate900,
         body: Center(
           child: Padding(
-            padding: EdgeInsets.all(24),
+            padding: const EdgeInsets.all(24),
             child: Text(
-              'Analytics is available to Master and Medical console roles.',
+              context.opsTr(
+                'Analytics is available to Master and Medical console roles.',
+              ),
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white54, fontSize: 15),
+              style: const TextStyle(color: Colors.white54, fontSize: 15),
             ),
           ),
         ),
@@ -391,8 +499,8 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                         Text(
                           _analyticsCategory == _AnalyticsCategory.feedback &&
                                   widget.access.canUseLiveOpsFeedback
-                              ? 'Community post-incident feedback'
-                              : 'Live operations analytics',
+                              ? context.opsTr('Community post-incident feedback')
+                              : context.opsTr('Live operations analytics'),
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w900,
@@ -402,8 +510,10 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                         Text(
                           _analyticsCategory == _AnalyticsCategory.feedback &&
                                   widget.access.canUseLiveOpsFeedback
-                              ? 'Ratings and comments from resolved SOS cases'
-                              : '${zone.label} · map locked to this area',
+                              ? context.opsTr('Ratings and comments from resolved SOS cases')
+                              : context
+                                  .opsTr('{zone} · map locked to this area')
+                                  .replaceAll('{zone}', zone.label),
                           style: const TextStyle(
                             color: Colors.white38,
                             fontSize: 11,
@@ -416,7 +526,9 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                     user?.email?.trim().isNotEmpty == true
                         ? user!.email!.trim()
                         : (widget.access.boundHospitalDocId != null
-                              ? 'Hospital ${widget.access.boundHospitalDocId}'
+                              ? context
+                                  .opsTr('Hospital {id}')
+                                  .replaceAll('{id}', widget.access.boundHospitalDocId!)
                               : user?.uid ?? ''),
                     style: const TextStyle(color: Colors.white38, fontSize: 11),
                   ),
@@ -472,9 +584,15 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                 final emsScene = active
                     .where((e) => e.emsWorkflowPhase == 'on_scene')
                     .length;
+                // Reserved aggregates used by the side-panel tooltips. Keep
+                // computed (cheap list walks) so enabling the panel doesn't
+                // re-walk the collection; referenced via ignore to silence
+                // the analyzer warning without deleting the intent.
+                // ignore: unused_local_variable
                 final withVol = active
                     .where((e) => e.acceptedVolunteerIds.isNotEmpty)
                     .length;
+                // ignore: unused_local_variable
                 final h24 = inZone
                     .where(
                       (e) =>
@@ -482,6 +600,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                           const Duration(hours: 24),
                     )
                     .length;
+                // ignore: unused_local_variable
                 final smsN = active.where((e) => e.smsRelayOrOrigin).length;
                 var triHigh = 0;
                 var triN = 0;
@@ -492,7 +611,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                   final sc = t['severityScore'];
                   if (sc is num && sc >= 50) triHigh++;
                 }
-                final types = _typeHistogram(active);
+                final types = _typeHistogram(context, active);
                 final topTypes = types.entries.toList()
                   ..sort((a, b) => b.value.compareTo(a.value));
                 final center = OpsIncidentAnalyticsDigest.centroid(
@@ -569,83 +688,81 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                           const Duration(hours: 48),
                     )
                     .toList();
-                final bins48 = OpsAnalyticsDerived.hexBinsForIncidents(
-                  inc48h,
-                  zone,
-                );
-                final hexSize = OpsAnalyticsHexGrid.hexSizeMetersForZone(
-                  zone.radiusM,
-                );
+                final hexSize = kZoneHexCircumRadiusM;
+                final bins48 = <String, int>{};
+                for (final e in inc48h) {
+                  final h = volunteerToHex(
+                    hexSize,
+                    zone.center.latitude,
+                    zone.center.longitude,
+                    e.liveVictimPin.latitude,
+                    e.liveVictimPin.longitude,
+                  );
+                  final k = h.storageKey;
+                  bins48[k] = (bins48[k] ?? 0) + 1;
+                }
                 var maxHex = 1;
                 for (final v in bins48.values) {
                   if (v > maxHex) maxHex = v;
                 }
+                // Draw 48h incident density overlay — only shown when NOT in selection mode
+                // so the clean ops coverage grid cells remain visible for picking.
                 final hexPolygons = <Polygon>{};
-                for (final e in bins48.entries) {
-                  final h = OpsAnalyticsHexGrid.parseKey(e.key);
-                  final ring = OpsAnalyticsHexGrid.hexRing(
-                    h.q,
-                    h.r,
-                    zone.center,
-                    hexSize,
-                  );
-                  final t = e.value / maxHex;
-                  final isSel = e.key == _confirmedHexKey ||
-                      e.key == _pendingHexKey;
-                  hexPolygons.add(
-                    Polygon(
-                      polygonId: PolygonId('hx_${e.key.replaceAll(',', '_')}'),
-                      points: ring,
-                      strokeColor: isSel
-                          ? Colors.cyanAccent
-                          : Colors.white.withValues(alpha: 0.3),
-                      strokeWidth: isSel ? 3 : 1,
-                      fillColor: Color.lerp(
-                        const Color(0xFF1565C0).withValues(alpha: 0.1),
-                        const Color(0xFFFF5722).withValues(alpha: 0.5),
-                        t,
-                      )!,
-                      zIndex: 4,
-                    ),
-                  );
-                }
-                if (_pendingHexKey != null &&
-                    !bins48.containsKey(_pendingHexKey)) {
-                  final h = OpsAnalyticsHexGrid.parseKey(_pendingHexKey!);
-                  final ring = OpsAnalyticsHexGrid.hexRing(
-                    h.q,
-                    h.r,
-                    zone.center,
-                    hexSize,
-                  );
-                  hexPolygons.add(
-                    Polygon(
-                      polygonId: const PolygonId('hx_pending_empty'),
-                      points: ring,
-                      strokeColor: Colors.cyanAccent,
-                      strokeWidth: 2,
-                      fillColor: Colors.cyanAccent.withValues(alpha: 0.12),
-                      zIndex: 4,
-                    ),
-                  );
-                }
-
-                final opsCoveragePolygons = <Polygon>{};
-                if (_analyticsShowOpsHexGrid &&
-                    !_hexSelectMode &&
-                    _cachedOpsCoverageHexModel != null) {
-                  for (final p in _cachedOpsCoverageHexModel!.polygons) {
-                    opsCoveragePolygons.add(
+                if (!_hexSelectMode) {
+                  for (final e in bins48.entries) {
+                    final h = HexAxial.tryParseStorageKey(e.key);
+                    if (h == null) continue;
+                    final ring = hexVerticesLatLng(zone.center, hexSize, h);
+                    final t = e.value / maxHex;
+                    hexPolygons.add(
                       Polygon(
-                        polygonId:
-                            PolygonId('an_ops_${p.polygonId.value}'),
-                        points: p.points,
-                        fillColor: p.fillColor,
-                        strokeColor: p.strokeColor,
-                        strokeWidth: p.strokeWidth,
-                        zIndex: 1,
+                        polygonId: PolygonId('hx_${e.key.replaceAll(',', '_')}'),
+                        points: ring,
+                        strokeColor: Colors.white.withValues(alpha: 0.3),
+                        strokeWidth: 1,
+                        fillColor: Color.lerp(
+                          const Color(0xFF1565C0).withValues(alpha: 0.1),
+                          const Color(0xFFFF5722).withValues(alpha: 0.5),
+                          t,
+                        )!,
+                        zIndex: 4,
                       ),
                     );
+                  }
+                }
+
+
+                // ── Ops coverage hex grid (same cells as Live Ops overview) ──────────
+                // Always shown so analytics view matches overview.
+                // In hex-select mode each polygon becomes tappable.
+                final opsCoveragePolygons = <Polygon>{};
+                final cachedCells = _cachedHexCells;
+                final hexCenter = _cachedHexCenter ?? zone.center;
+                if (cachedCells != null) {
+                  for (final entry in cachedCells.entries) {
+                    final h = entry.key;
+                    final cov = entry.value;
+                    final key = h.storageKey;
+                    final health = tierHealthForCell(cov);
+                    final style = styleForTierHealth(health);
+                    final isSelected = key == (_confirmedHexKey ?? _pendingHexKey);
+                    final pts = hexVerticesLatLng(hexCenter, kZoneHexCircumRadiusM, h);
+                    opsCoveragePolygons.add(Polygon(
+                      consumeTapEvents: true,
+                      polygonId: PolygonId('ops_hex_${key.replaceAll(',', '_')}'),
+                      points: pts,
+                      fillColor: isSelected
+                          ? Colors.cyanAccent.withValues(alpha: 0.28)
+                          : style.fill,
+                      strokeColor: isSelected
+                          ? Colors.cyanAccent
+                          : style.stroke.withValues(alpha: 0.45),
+                      strokeWidth: isSelected ? 3 : 1,
+                      zIndex: isSelected ? 10 : 1,
+                      onTap: _hexSelectMode
+                          ? () => setState(() => _pendingHexKey = key)
+                          : null,
+                    ));
                   }
                 }
                 final allMapHexPolygons = {
@@ -689,7 +806,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  'Hex $key',
+                                  context.opsTr('Hex {key}').replaceAll('{key}', key),
                                   style: TextStyle(
                                     color: _accent,
                                     fontWeight: FontWeight.w900,
@@ -701,7 +818,10 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            '$n48 incidents in cell (48h bin) · ${inCell.length} pin(s) located in cell',
+                            context
+                                .opsTr('{n48} incidents in cell (48h bin) · {pins} pin(s) located in cell')
+                                .replaceAll('{n48}', '$n48')
+                                .replaceAll('{pins}', '${inCell.length}'),
                             style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 11,
@@ -723,13 +843,119 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                               ),
                             if (inCell.length > 8)
                               Text(
-                                '+${inCell.length - 8} more',
+                                context
+                                    .opsTr('+{count} more')
+                                    .replaceAll('{count}', '${inCell.length - 8}'),
                                 style: const TextStyle(
                                   color: Colors.white38,
                                   fontSize: 10,
                                 ),
                               ),
                           ],
+                          const SizedBox(height: 12),
+                          if (_isLoadingEnvData)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8.0),
+                              child: Row(
+                                children: [
+                                  const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white54,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    context.opsTr('Fetching environmental data...'),
+                                    style: const TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else if (_selectedHexEnvData != null)
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.3),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: _selectedHexEnvData!.categoryColor
+                                      .withValues(alpha: 0.5),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.air,
+                                        color: _selectedHexEnvData!.categoryColor,
+                                        size: 16,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        context
+                                            .opsTr('AQI: {aqi} ({category})')
+                                            .replaceAll('{aqi}', '${_selectedHexEnvData!.aqi}')
+                                            .replaceAll('{category}', _selectedHexEnvData!.category),
+                                        style: TextStyle(
+                                          color: _selectedHexEnvData!.categoryColor,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (_selectedHexEnvData!
+                                          .healthRecommendation !=
+                                      null) ...[
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      _selectedHexEnvData!.healthRecommendation!,
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 10,
+                                        height: 1.3,
+                                      ),
+                                    ),
+                                  ],
+                                  if (_selectedHexEnvData!.hasHeatWarning) ...[
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Padding(
+                                          padding: EdgeInsets.only(top: 2.0),
+                                          child: Icon(
+                                            Icons.local_fire_department,
+                                            color: Colors.orangeAccent,
+                                            size: 16,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text(
+                                            _selectedHexEnvData!.heatStrokeWarning,
+                                            style: const TextStyle(
+                                              color: Colors.orangeAccent,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              height: 1.3,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -757,9 +983,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                                 AppColors.accentBlue.withValues(alpha: 0.9),
                           ),
                           const SizedBox(width: 8),
-                          const Text(
-                            'Trends & breakdown',
-                            style: TextStyle(
+                          Text(context.opsTr('Trends & breakdown'), style: TextStyle(
                               color: Colors.white70,
                               fontSize: 13,
                               fontWeight: FontWeight.w700,
@@ -770,27 +994,11 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                       const SizedBox(height: 12),
                       OpsAnalyticsTrendChart(counts: trend7, now: now),
                       const SizedBox(height: 12),
-                      const Text(
-                        'Hex overlay: 48h incident density (blue → orange, tappable) on top; '
-                        'operational coverage tier grid (toggle) matches Live Ops overview.',
-                        style: TextStyle(
-                          color: Colors.white38,
-                          fontSize: 10,
-                          height: 1.3,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
                       ..._metricsRailTail(
                         cat: cat,
                         bins48: bins48,
                         zone: zone,
                         inc48h: inc48h,
-                        active: active,
-                        pending: pending,
-                        dispatched: dispatched,
-                        h24: h24,
-                        withVol: withVol,
-                        smsN: smsN,
                         triN: triN,
                         triHigh: triHigh,
                         topTypes: topTypes,
@@ -803,6 +1011,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                   ),
                 );
 
+                final hid = (widget.access.boundHospitalDocId ?? '').trim();
                 final leftBody = Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -810,11 +1019,23 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                       color: AppColors.slate800,
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-                        child: _analyticsCategoryChips(),
+                        child: _analyticsCategoryChips(context),
                       ),
                     ),
+                    if (widget.access.role == AdminConsoleRole.medical &&
+                        hid.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      HospitalAnalyticsInboundRail(
+                        hospitalDocId: hid,
+                        accent: _accent,
+                        selectedIncidentId: _selectedInboundIncidentId,
+                        onSelectIncident: (id) =>
+                            setState(() => _selectedInboundIncidentId = id),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     _analyticsStatusSection(
+                      context,
                       active.length,
                       inZone.length,
                     ),
@@ -825,7 +1046,11 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            '${active.length} active · ${inZone.length} in zone · zoom ${(_analyticsMapZoom).toStringAsFixed(1)}',
+                            context
+                                .opsTr('{active} active · {in_zone} · zoom {zoom}')
+                                .replaceAll('{active}', '${active.length}')
+                                .replaceAll('{in_zone}', '${inZone.length}')
+                                .replaceAll('{zoom}', _analyticsMapZoom.toStringAsFixed(1)),
                             textAlign: TextAlign.start,
                             style: const TextStyle(
                               color: Colors.white54,
@@ -846,9 +1071,9 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                             _hexSelectMode = !_hexSelectMode;
                             if (!_hexSelectMode) {
                               _pendingHexKey = null;
-                            } else {
-                              _analyticsShowOpsHexGrid = false;
                             }
+                            // Always keep ops coverage grid visible so the
+                            // user can tap the correct hex cell to select it.
                           }),
                           style: FilledButton.styleFrom(
                             foregroundColor: _hexSelectMode
@@ -860,8 +1085,8 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                           ),
                           child: Text(
                             _hexSelectMode
-                                ? 'Cancel hex pick'
-                                : 'Select hex cell',
+                                ? context.opsTr('Cancel hex pick')
+                                : context.opsTr('Select hex cell'),
                           ),
                         ),
                         if (_confirmedHexKey != null)
@@ -874,10 +1099,10 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                             style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.cyanAccent,
                             ),
-                            child: const Text('Clear selection'),
+                            child: Text(context.opsTr('Clear selection')),
                           ),
                         FilterChip(
-                          label: const Text('Ops coverage grid'),
+                          label: Text(context.opsTr('Ops coverage grid')),
                           selected: _analyticsShowOpsHexGrid,
                           onSelected: (v) => setState(() {
                             _analyticsShowOpsHexGrid = v;
@@ -969,9 +1194,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                                   Icon(Icons.touch_app_rounded,
                                       color: _accent, size: 20),
                                   const SizedBox(width: 10),
-                                  const Text(
-                                    'Tap a 48h density cell (colored overlay)',
-                                    style: TextStyle(
+                                  Text(context.opsTr('Tap an ops coverage hex cell to select it'), style: TextStyle(
                                       color: Colors.white,
                                       fontWeight: FontWeight.w700,
                                       fontSize: 13,
@@ -1003,7 +1226,9 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Text(
-                                          'Cell ${_pendingHexKey!}',
+                                          context
+                                              .opsTr('Cell {key}')
+                                              .replaceAll('{key}', _pendingHexKey!),
                                           style: TextStyle(
                                             color: _accent,
                                             fontWeight: FontWeight.w900,
@@ -1012,7 +1237,9 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
-                                          '${bins48[_pendingHexKey!] ?? 0} incidents (48h) in this hex',
+                                          context
+                                              .opsTr('{count} incidents (48h) in this hex')
+                                              .replaceAll('{count}', '${bins48[_pendingHexKey!] ?? 0}'),
                                           style: const TextStyle(
                                             color: Colors.white70,
                                             fontSize: 12,
@@ -1024,7 +1251,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                                   TextButton(
                                     onPressed: () => setState(
                                         () => _pendingHexKey = null),
-                                    child: const Text('Cancel'),
+                                    child: Text(context.opsTr('Cancel')),
                                   ),
                                   const SizedBox(width: 4),
                                   FilledButton(
@@ -1044,7 +1271,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                                     style: FilledButton.styleFrom(
                                       backgroundColor: _accent,
                                     ),
-                                    child: const Text('Confirm'),
+                                    child: Text(context.opsTr('Confirm')),
                                   ),
                                 ],
                               ),
@@ -1065,8 +1292,10 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                             const EdgeInsets.fromLTRB(10, 0, 10, 6),
                         child: Text(
                           _confirmedHexKey != null
-                              ? 'Map zoomed to the selected hex. Tap Clear selection in the left rail to reset the view.'
-                              : 'Pick a hex, then Confirm to zoom in and inspect.',
+                              ? context.opsTr(
+                                  'Map zoomed to the selected hex. Tap Clear selection in the left rail to reset the view.',
+                                )
+                              : context.opsTr('Pick a hex, then Confirm to zoom in and inspect.'),
                           style: const TextStyle(
                             color: Colors.white38,
                             fontSize: 10,
@@ -1136,9 +1365,25 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
                               _analyticsDetailPanelOpen =
                                   !_analyticsDetailPanelOpen),
                           accent: _accent,
-                          title: 'Details',
-                          openWidth: 420,
-                          body: detailPanel,
+                          title: _sidePanelTitle(context),
+                          openWidth: 360,
+                          body: _buildSidePanelBody(
+                            zone: zone,
+                            hexSize: hexSize,
+                            now: now,
+                            active: active,
+                            pending: pending,
+                            dispatched: dispatched,
+                            emsAwait: emsAwait,
+                            emsInbound: emsInbound,
+                            emsScene: emsScene,
+                            inc48h: inc48h,
+                            zoneIncidents: inZone,
+                            bins48: bins48,
+                            trend7: trend7,
+                            mapCenterTarget: mapCenterTarget,
+                            defaultMapZoom: defaultMapZoom,
+                          ),
                         ),
                       ],
                     );
@@ -1152,18 +1397,131 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
     );
   }
 
-  /// Hotspot, stat cards, pies, triage — shown in the Details panel (trends & breakdown).
+  // ── Role-aware side panel (wide layout) ─────────────────────────────────
+
+  String _sidePanelTitle(BuildContext context) {
+    if (_confirmedHexKey != null) {
+      return context
+          .opsTr('Focus · #{key}')
+          .replaceAll('{key}', _confirmedHexKey!);
+    }
+    if (widget.access.role == AdminConsoleRole.master) {
+      return context.opsTr('System pulse');
+    }
+    return context.opsTr('Facility pulse');
+  }
+
+  Future<void> _zoomIntoHexKey(IndiaOpsZone zone, double hexSize, String key) async {
+    setState(() {
+      _pendingHexKey = null;
+      _confirmedHexKey = key;
+      _hexSelectMode = false;
+    });
+    await _focusConfirmedHex(zone, hexSize, key);
+  }
+
+  Widget _buildSidePanelBody({
+    required IndiaOpsZone zone,
+    required double hexSize,
+    required DateTime now,
+    required List<SosIncident> active,
+    required int pending,
+    required int dispatched,
+    required int emsAwait,
+    required int emsInbound,
+    required int emsScene,
+    required List<SosIncident> inc48h,
+    required List<SosIncident> zoneIncidents,
+    required Map<String, int> bins48,
+    required List<int> trend7,
+    required LatLng mapCenterTarget,
+    required double defaultMapZoom,
+  }) {
+    // Focus mode — a hex is selected.
+    final confirmed = _confirmedHexKey;
+    if (confirmed != null) {
+      final inCell = _incidentsForHexKey(inc48h, confirmed, zone.center, hexSize);
+      return AnalyticsFocusBody(
+        accent: _accent,
+        hexKey: confirmed,
+        n48Bin: bins48[confirmed] ?? 0,
+        inCell: inCell,
+        zone: zone,
+        hexSize: hexSize,
+        hospitals: _allOpsHospitals,
+        cachedHexCells: _cachedHexCells,
+        isLoadingEnvData: _isLoadingEnvData,
+        envData: _selectedHexEnvData,
+        isMaster: widget.access.role == AdminConsoleRole.master,
+        myHospitalDocId: widget.access.boundHospitalDocId,
+        onClearSelection: () =>
+            _clearHexSelection(zone, mapCenterTarget, defaultMapZoom),
+        onOpenIncident: (_) {
+          // Leaving focus to Live Ops navigation is a parent-app concern; for
+          // now, simply keep the focus card behavior (tap has no route target
+          // in this screen).
+        },
+      );
+    }
+
+    // Dashboard mode — role-aware.
+    if (widget.access.role == AdminConsoleRole.master) {
+      return MasterSystemPulseBody(
+        accent: _accent,
+        now: now,
+        zone: zone,
+        hexSize: hexSize,
+        inc48h: inc48h,
+        active: active,
+        pending: pending,
+        dispatched: dispatched,
+        emsAwait: emsAwait,
+        emsInbound: emsInbound,
+        emsScene: emsScene,
+        hospitals: _allOpsHospitals,
+        volunteerDutyCount: _volunteerDutyDocs.length,
+        bins48: bins48,
+        cachedHexCells: _cachedHexCells,
+        trend7: trend7,
+        onZoomHex: (key) => unawaited(_zoomIntoHexKey(zone, hexSize, key)),
+      );
+    }
+
+    return HospitalFacilityPulseBody(
+      accent: _accent,
+      now: now,
+      boundHospitalDocId: widget.access.boundHospitalDocId ?? '',
+      hospitals: _allOpsHospitals,
+      zone: zone,
+      hexSize: hexSize,
+      cachedHexCells: _cachedHexCells,
+      zoneIncidents: zoneIncidents,
+      showInboundCard: widget.access.role != AdminConsoleRole.medical,
+      onOpenIncident: (_) {
+        // Same caveat as focus-mode — Live Ops navigation is not wired here.
+      },
+      onManageServices: () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.slate700,
+            content: Text(
+              context.opsTr(
+                'Open the Hospital Live Ops tab to edit services and beds.',
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Hotspot, pies, triage — shown inline below the map (narrow layout) and
+  /// acts as a compact supplement to the role-aware side panel on wide layouts.
   List<Widget> _metricsRailTail({
     required _AnalyticsCategory cat,
     required Map<String, int> bins48,
     required IndiaOpsZone zone,
     required List<SosIncident> inc48h,
-    required List<SosIncident> active,
-    required int pending,
-    required int dispatched,
-    required int h24,
-    required int withVol,
-    required int smsN,
     required int triN,
     required int triHigh,
     required List<MapEntry<String, int>> topTypes,
@@ -1202,119 +1560,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
         ),
         const SizedBox(height: 16),
       ],
-      if (cat == _AnalyticsCategory.sos)
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            _statCard(
-              'Active',
-              '${active.length}',
-              Icons.emergency,
-              Colors.orangeAccent,
-            ),
-            _statCard(
-              'Pending',
-              '$pending',
-              Icons.pending_actions,
-              Colors.amber,
-            ),
-            _statCard(
-              'Dispatched',
-              '$dispatched',
-              Icons.send,
-              AppColors.accentBlue,
-            ),
-            _statCard('24h (all)', '$h24', Icons.schedule, Colors.cyanAccent),
-            _statCard(
-              '+Volunteers',
-              '$withVol',
-              Icons.groups,
-              Colors.lightGreenAccent,
-            ),
-            _statCard('SMS-linked', '$smsN', Icons.sms, Colors.tealAccent),
-          ],
-        ),
-      if (cat == _AnalyticsCategory.fleet)
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            _statCard(
-              'Active',
-              '${active.length}',
-              Icons.emergency,
-              Colors.orangeAccent,
-            ),
-            _statCard(
-              'Pending',
-              '$pending',
-              Icons.pending_actions,
-              Colors.amber,
-            ),
-            _statCard(
-              'Dispatched',
-              '$dispatched',
-              Icons.send,
-              AppColors.accentBlue,
-            ),
-            _statCard('24h (all)', '$h24', Icons.schedule, Colors.cyanAccent),
-            _statCard('SMS-linked', '$smsN', Icons.sms, Colors.tealAccent),
-          ],
-        ),
-      if (cat == _AnalyticsCategory.hospitals)
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            _statCard(
-              'Active',
-              '${active.length}',
-              Icons.emergency,
-              Colors.orangeAccent,
-            ),
-            _statCard('SMS-linked', '$smsN', Icons.sms, Colors.tealAccent),
-            _statCard(
-              'Dispatched',
-              '$dispatched',
-              Icons.local_hospital,
-              AppColors.accentBlue,
-            ),
-          ],
-        ),
-      if (cat == _AnalyticsCategory.volunteers)
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            _statCard(
-              'Active',
-              '${active.length}',
-              Icons.emergency,
-              Colors.orangeAccent,
-            ),
-            _statCard(
-              '+Volunteers',
-              '$withVol',
-              Icons.groups,
-              Colors.lightGreenAccent,
-            ),
-            _statCard(
-              'Pending',
-              '$pending',
-              Icons.pending_actions,
-              Colors.amber,
-            ),
-            _statCard(
-              'Dispatched',
-              '$dispatched',
-              Icons.send,
-              AppColors.accentBlue,
-            ),
-          ],
-        ),
       if (cat == _AnalyticsCategory.sos || cat == _AnalyticsCategory.fleet) ...[
-        const SizedBox(height: 16),
         Wrap(
           spacing: 12,
           runSpacing: 12,
@@ -1435,53 +1681,6 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
               color: Colors.redAccent,
               fontSize: 10,
               fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _statCard(String label, String value, IconData icon, Color c) {
-    return Container(
-      width: 150,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.slate800,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Icon(icon, color: c, size: 22),
-              Text(
-                value,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 22,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white54,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -1682,6 +1881,7 @@ class _AdminAnalyticsDashboardState extends State<AdminAnalyticsDashboard> {
     );
   }
 
+  // ignore: unused_element
   Widget _typeBar(String name, int count, int maxV) {
     final frac = maxV == 0 ? 0.0 : count / maxV;
     return Column(

@@ -249,7 +249,7 @@ Future<void> _speakAsync(String text, String lang, void Function()? onDone) asyn
   }
 
   try {
-    await _tts.setCompletionHandler(() => tryDone());
+    _tts.setCompletionHandler(() => tryDone());
     await _tts.stop();
     final langTag = await _effectiveTtsLanguage(lang.replaceAll('_', '-'));
     if (langTag.replaceAll('_', '-') != lang.replaceAll('_', '-')) {
@@ -283,3 +283,29 @@ void cancelSpeechText() {
 }
 
 void primeSpeechAudioContext() {}
+
+/// True when [FlutterTts] reports the BCP-47 language as available (no English fallback).
+Future<bool> nativeVoiceAvailable(String bcp47) async {
+  await _ensureTts();
+  final primary = bcp47.trim().replaceAll('_', '-');
+  if (primary.isEmpty) return true;
+  try {
+    final a = await _tts.isLanguageAvailable(primary);
+    if (_truthyLangAvailable(a)) return true;
+  } catch (e) {
+    debugPrint('[speech_io] isLanguageAvailable("$primary"): $e');
+  }
+  if (primary.contains('-')) {
+    final legacy =
+        '${primary.split('-').first}_${primary.split('-')[1].toUpperCase()}';
+    if (legacy != primary) {
+      try {
+        final a = await _tts.isLanguageAvailable(legacy);
+        if (_truthyLangAvailable(a)) return true;
+      } catch (_) {}
+    }
+  }
+  return false;
+}
+
+void bankUserGestureForWeb() {}

@@ -119,6 +119,7 @@ class FamilyTrackerScreen extends StatelessWidget {
               ),
               Expanded(
                 child: EosHybridMap(
+                  ignoreRemoteLeafletTiles: false,
                   initialCameraPosition: CameraPosition(
                     target: dest,
                     zoom: 14,

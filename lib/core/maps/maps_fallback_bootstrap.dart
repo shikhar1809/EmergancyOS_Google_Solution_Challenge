@@ -1,5 +1,3 @@
-import 'dart:async' show unawaited;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -24,12 +22,9 @@ class _MapsFallbackBootstrapState extends ConsumerState<MapsFallbackBootstrap> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // Restore persisted OSM fallback only if a prior session hit Google failure
+      // (or master explicitly forced OSM). Default is Google Maps everywhere.
       await ref.read(mapsLeafletFallbackProvider.notifier).hydrate();
-      if (!mounted) return;
-      ref.read(mapsLeafletFallbackProvider.notifier).setLeafletExplicit(
-            true,
-            reason: 'opensource_default',
-          );
     });
     if (kIsWeb && !_webHooked) {
       _webHooked = true;

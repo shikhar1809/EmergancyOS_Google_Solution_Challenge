@@ -14,6 +14,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../services/incident_service.dart';
 import '../../../services/ops_support_service.dart';
 import '../domain/admin_panel_access.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 /// Master-console tabs: live picture, lifecycle/audit export, data quality, support tools.
 class AdminOpsDeskScreen extends StatefulWidget {
@@ -166,12 +167,10 @@ class _LiveOpsTab extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            const Text('Hot zones (rounded lat/lng, count > 1)',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+            Text(context.opsTr('Hot zones (rounded lat/lng, count > 1)'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
             if (hot.isEmpty)
-              const Text('No duplicate grid cells in current sample.',
-                  style: TextStyle(color: Colors.white54, fontSize: 12))
+              Text(context.opsTr('No duplicate grid cells in current sample.'), style: TextStyle(color: Colors.white54, fontSize: 12))
             else
               ...hot.take(8).map(
                     (e) => Padding(
@@ -294,16 +293,14 @@ class _LifecycleAuditTabState extends State<_LifecycleAuditTab> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text(
-          'Lifecycle phases in-app: Open (pending) → Assigned (dispatched) / Blocked → archived as Closed.',
-          style: TextStyle(color: Colors.white70, height: 1.35),
+        Text(context.opsTr('Lifecycle phases in-app: Open (pending) → Assigned (dispatched) / Blocked → archived as Closed.'), style: TextStyle(color: Colors.white70, height: 1.35),
         ),
         const SizedBox(height: 16),
         TextField(
           controller: _c,
           style: const TextStyle(color: Colors.white),
           decoration: InputDecoration(
-            labelText: 'Incident ID',
+            labelText: context.opsTr('Incident ID'),
             labelStyle: const TextStyle(color: Colors.white54),
             filled: true,
             fillColor: AppColors.slate800,
@@ -316,23 +313,22 @@ class _LifecycleAuditTabState extends State<_LifecycleAuditTab> {
             FilledButton(
               onPressed: () => setState(() => _streamId = _c.text.trim()),
               style: FilledButton.styleFrom(backgroundColor: AppColors.slate700),
-              child: const Text('Apply / stream'),
+              child: Text(context.opsTr('Apply / stream')),
             ),
             const SizedBox(width: 10),
             FilledButton.icon(
               onPressed: () => _exportAudit(context, _c.text),
               icon: const Icon(Icons.copy_rounded),
-              label: const Text('Copy audit CSV'),
+              label: Text(context.opsTr('Copy audit CSV')),
               style: FilledButton.styleFrom(backgroundColor: AppColors.accentBlue),
             ),
           ],
         ),
         const SizedBox(height: 24),
-        const Text('Live audit log', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+        Text(context.opsTr('Live audit log'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
         if (_streamId.isEmpty)
-          const Text('Enter an incident id and tap Apply / stream.',
-              style: TextStyle(color: Colors.white38))
+          Text(context.opsTr('Enter an incident id and tap Apply / stream.'), style: TextStyle(color: Colors.white38))
         else
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: FirebaseFirestore.instance
@@ -354,7 +350,7 @@ class _LifecycleAuditTabState extends State<_LifecycleAuditTab> {
               }
               final docs = snap.data?.docs ?? [];
               if (docs.isEmpty) {
-                return const Text('No audit rows yet.', style: TextStyle(color: Colors.white54));
+                return Text(context.opsTr('No audit rows yet.'), style: TextStyle(color: Colors.white54));
               }
               return Column(
                 children: [
@@ -490,7 +486,7 @@ class _DataQualityTabState extends State<_DataQualityTab> {
                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 )
               : const Icon(Icons.analytics_outlined),
-          label: const Text('Run checks'),
+          label: Text(context.opsTr('Run checks')),
           style: FilledButton.styleFrom(backgroundColor: AppColors.accentBlue),
         ),
         const SizedBox(height: 16),
@@ -529,7 +525,7 @@ class _SupportTab extends StatelessWidget {
           controller: uidCtrl,
           style: const TextStyle(color: Colors.white),
           decoration: InputDecoration(
-            labelText: 'User UID',
+            labelText: context.opsTr('User UID'),
             labelStyle: const TextStyle(color: Colors.white54),
             filled: true,
             fillColor: AppColors.slate800,
@@ -541,7 +537,7 @@ class _SupportTab extends StatelessWidget {
           controller: emailCtrl,
           style: const TextStyle(color: Colors.white),
           decoration: InputDecoration(
-            labelText: 'Email (exact match)',
+            labelText: context.opsTr('Email (exact match)'),
             labelStyle: const TextStyle(color: Colors.white54),
             filled: true,
             fillColor: AppColors.slate800,
@@ -564,7 +560,7 @@ class _SupportTab extends StatelessWidget {
             }
           },
           style: FilledButton.styleFrom(backgroundColor: AppColors.accentBlue),
-          child: const Text('Lookup'),
+          child: Text(context.opsTr('Lookup')),
         ),
         if (digest != null) ...[
           const SizedBox(height: 20),
@@ -589,7 +585,7 @@ class _SupportTab extends StatelessWidget {
                   }
                 }
               },
-              child: const Text('Force sign-out user'),
+              child: Text(context.opsTr('Force sign-out user')),
             ),
             const SizedBox(height: 8),
             FilledButton.tonal(
@@ -605,7 +601,7 @@ class _SupportTab extends StatelessWidget {
                   );
                 }
               },
-              child: const Text('Copy ops dashboard deep link (focus last incident)'),
+              child: Text(context.opsTr('Copy ops dashboard deep link (focus last incident)')),
             ),
           ],
         ],

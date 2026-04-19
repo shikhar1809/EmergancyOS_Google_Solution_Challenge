@@ -110,6 +110,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Semantics(
             label: l.homeMapSemantics,
             child: EosHybridMap(
+            ignoreRemoteLeafletTiles: false,
             mapType: MapType.normal,
             cloudMapId: AppConstants.googleMapsDarkMapId.isNotEmpty
                 ? AppConstants.googleMapsDarkMapId

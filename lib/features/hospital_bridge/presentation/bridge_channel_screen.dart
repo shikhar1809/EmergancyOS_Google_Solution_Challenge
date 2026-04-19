@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 /// Stub - full channel screen is embedded in bridge_home_screen.dart
 class BridgeChannelScreen extends StatelessWidget {
@@ -6,12 +7,12 @@ class BridgeChannelScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Color(0xFF0D1117),
+    return Scaffold(
+      backgroundColor: const Color(0xFF0D1117),
       body: Center(
         child: Text(
-          'Use BridgeHomeScreen instead',
-          style: TextStyle(color: Colors.white54),
+          context.opsTr('Use BridgeHomeScreen instead'),
+          style: const TextStyle(color: Colors.white54),
         ),
       ),
     );

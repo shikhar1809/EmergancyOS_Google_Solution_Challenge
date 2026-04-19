@@ -35,7 +35,7 @@ class EmergencyAnalyticsService {
       final db = FirebaseFirestore.instance;
       // Fetch up to 100 recent archived incidents (for historical hotspotting)
       final archivedSnap = await db
-          .collection('incidents')
+          .collection('sos_incidents')
           .where('isArchived', isEqualTo: true)
           .orderBy('archivedAt', descending: true)
           .limit(100)
@@ -43,7 +43,7 @@ class EmergencyAnalyticsService {
 
       // Fetch active
       final activeSnap = await db
-          .collection('incidents')
+          .collection('sos_incidents')
           .where('isArchived', isEqualTo: false)
           .get();
 

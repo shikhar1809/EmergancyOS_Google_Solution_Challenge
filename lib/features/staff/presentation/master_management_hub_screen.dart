@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/l10n/dashboard_l10n.dart';
 import '../../../core/theme/app_colors.dart';
 import '../domain/admin_panel_access.dart';
 import '../domain/command_center_accent.dart';
@@ -26,7 +27,7 @@ class MasterManagementHubScreen extends StatelessWidget {
                 Icon(Icons.admin_panel_settings_outlined, color: accent, size: 28),
                 const SizedBox(width: 12),
                 Text(
-                  'Management',
+                  context.opsTr('Management'),
                   style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900),
                 ),
               ],

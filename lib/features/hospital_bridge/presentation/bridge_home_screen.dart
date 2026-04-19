@@ -2,15 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_riverpod/legacy.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../data/bridge_repository.dart';
-import '../data/hospital_bridge_service.dart';
 import '../domain/bridge_server_model.dart';
 import '../domain/bridge_channel_model.dart';
 import '../providers/bridge_state_provider.dart';
 import 'bridge_create_channel_dialog.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 class BridgeHomeScreen extends ConsumerStatefulWidget {
   const BridgeHomeScreen({super.key});
@@ -358,9 +357,7 @@ class _ChannelList extends StatelessWidget {
                           color: Colors.white54,
                           size: 18,
                         ),
-                        label: const Text(
-                          'Create Channel',
-                          style: TextStyle(color: Colors.white54, fontSize: 12),
+                        label: Text(context.opsTr('Create Channel'), style: TextStyle(color: Colors.white54, fontSize: 12),
                         ),
                       ),
                     ),
@@ -468,7 +465,7 @@ class _ChannelHeader extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.call_end, color: Color(0xFFDA3634)),
             onPressed: onLeave,
-            tooltip: 'Leave channel',
+            tooltip: context.opsTr('Leave channel'),
           ),
         ],
       ),
@@ -635,7 +632,7 @@ class _ChatView extends StatelessWidget {
                   controller: controller,
                   style: const TextStyle(color: Colors.white, fontSize: 13),
                   decoration: InputDecoration(
-                    hintText: 'Message #channel',
+                    hintText: context.opsTr('Message #channel'),
                     hintStyle: const TextStyle(color: Colors.white38),
                     filled: true,
                     fillColor: const Color(0xFF0D1117),
@@ -749,9 +746,7 @@ class _MemberList extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'ONLINE',
-            style: TextStyle(
+          Text(context.opsTr('ONLINE'), style: TextStyle(
               color: Colors.white54,
               fontSize: 11,
               fontWeight: FontWeight.w700,

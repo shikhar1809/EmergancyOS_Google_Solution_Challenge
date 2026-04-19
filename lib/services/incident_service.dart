@@ -5,13 +5,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../core/constants/app_constants.dart';
 import '../core/utils/sos_demo_incident_filter.dart';
-import 'connectivity_service.dart';
 import 'drill_session_persistence.dart';
 import 'offline_cache_service.dart';
 import 'leaderboard_service.dart';
@@ -73,11 +73,18 @@ class SosIncident {
   final bool geoSmsPatternRecognized;
   final DateTime? geoSmsRecognizedAt;
 
-  /// EMS / official unit workflow: `inbound` after accept, `on_scene` within 5 km of victim.
+  /// EMS / official unit workflow: `inbound` → `on_scene` (~200 m) → `returning` (rescue complete) → `complete` (then archived).
   final String? emsWorkflowPhase;
   final DateTime? emsAcceptedAt;
   final String? emsAcceptedBy;
   final DateTime? emsOnSceneAt;
+  final DateTime? emsRescueCompleteAt;
+  final DateTime? emsReturningStartedAt;
+  final DateTime? emsHospitalArrivalAt;
+  final DateTime? emsResponseCompleteAt;
+  final String? returnHospitalId;
+  final double? returnHospitalLat;
+  final double? returnHospitalLng;
 
   /// Crane / heavy recovery unit (mobile console + command).
   final String? craneUnitAcceptedBy;
@@ -185,6 +192,13 @@ class SosIncident {
     this.emsAcceptedAt,
     this.emsAcceptedBy,
     this.emsOnSceneAt,
+    this.emsRescueCompleteAt,
+    this.emsReturningStartedAt,
+    this.emsHospitalArrivalAt,
+    this.emsResponseCompleteAt,
+    this.returnHospitalId,
+    this.returnHospitalLat,
+    this.returnHospitalLng,
     this.craneUnitAcceptedBy,
     this.craneUnitAcceptedAt,
     this.craneLiveLat,
@@ -259,6 +273,13 @@ class SosIncident {
     if (emsAcceptedAt != null) 'emsAcceptedAt': emsAcceptedAt!.toIso8601String(),
     if (emsAcceptedBy != null) 'emsAcceptedBy': emsAcceptedBy,
     if (emsOnSceneAt != null) 'emsOnSceneAt': emsOnSceneAt!.toIso8601String(),
+    if (emsRescueCompleteAt != null) 'emsRescueCompleteAt': emsRescueCompleteAt!.toIso8601String(),
+    if (emsReturningStartedAt != null) 'emsReturningStartedAt': emsReturningStartedAt!.toIso8601String(),
+    if (emsHospitalArrivalAt != null) 'emsHospitalArrivalAt': emsHospitalArrivalAt!.toIso8601String(),
+    if (emsResponseCompleteAt != null) 'emsResponseCompleteAt': emsResponseCompleteAt!.toIso8601String(),
+    if (returnHospitalId != null) 'returnHospitalId': returnHospitalId,
+    if (returnHospitalLat != null) 'returnHospitalLat': returnHospitalLat,
+    if (returnHospitalLng != null) 'returnHospitalLng': returnHospitalLng,
     if (craneUnitAcceptedBy != null) 'craneUnitAcceptedBy': craneUnitAcceptedBy,
     if (craneUnitAcceptedAt != null) 'craneUnitAcceptedAt': craneUnitAcceptedAt!.toIso8601String(),
     if (craneLiveLat != null) 'craneLiveLat': craneLiveLat,
@@ -347,6 +368,17 @@ class SosIncident {
     emsAcceptedBy: j['emsAcceptedBy'] as String?,
     emsOnSceneAt:
         j['emsOnSceneAt'] != null ? _parseInstant(j['emsOnSceneAt']) : null,
+    emsRescueCompleteAt:
+        j['emsRescueCompleteAt'] != null ? _parseInstant(j['emsRescueCompleteAt']) : null,
+    emsReturningStartedAt:
+        j['emsReturningStartedAt'] != null ? _parseInstant(j['emsReturningStartedAt']) : null,
+    emsHospitalArrivalAt:
+        j['emsHospitalArrivalAt'] != null ? _parseInstant(j['emsHospitalArrivalAt']) : null,
+    emsResponseCompleteAt:
+        j['emsResponseCompleteAt'] != null ? _parseInstant(j['emsResponseCompleteAt']) : null,
+    returnHospitalId: j['returnHospitalId'] as String?,
+    returnHospitalLat: (j['returnHospitalLat'] as num?)?.toDouble(),
+    returnHospitalLng: (j['returnHospitalLng'] as num?)?.toDouble(),
     craneUnitAcceptedBy: j['craneUnitAcceptedBy'] as String?,
     craneUnitAcceptedAt: j['craneUnitAcceptedAt'] != null
         ? _parseInstant(j['craneUnitAcceptedAt'])
@@ -573,6 +605,91 @@ class IncidentService {
   static bool wasCreatedOnThisDevice(String id) =>
       _deviceCreatedIncidentIds.contains(id);
 
+  /// Reverse-geocode [location] to a 3-letter uppercase area code (e.g. "LKO"
+  /// for Lucknow). Returns `'UNK'` when geocoding is unavailable (e.g. web) or
+  /// when no locality can be determined. Kept short so incident IDs stay
+  /// compact enough to dictate over radio.
+  static Future<String> _resolveAreaCode(LatLng location) async {
+    try {
+      final marks = await placemarkFromCoordinates(
+        location.latitude,
+        location.longitude,
+      ).timeout(const Duration(seconds: 3));
+      for (final m in marks) {
+        for (final candidate in [
+          m.locality,
+          m.subAdministrativeArea,
+          m.administrativeArea,
+          m.country,
+        ]) {
+          final s = (candidate ?? '').trim();
+          if (s.isEmpty) continue;
+          final letters = s
+              .toUpperCase()
+              .replaceAll(RegExp(r'[^A-Z]'), '');
+          if (letters.length >= 3) return letters.substring(0, 3);
+          if (letters.length == 2) return '${letters}X';
+        }
+      }
+    } catch (e) {
+      debugPrint('[IncidentService] reverse geocode failed: $e');
+    }
+    return 'UNK';
+  }
+
+  /// Next sequence number for `counters/incident_seq_{area}`. Atomic via
+  /// transaction; falls back to a timestamp-derived number if Firestore is
+  /// unreachable so the ID is still unique.
+  static Future<int> _nextIncidentSeq(String areaCode) async {
+    final ref = _db
+        .collection('counters')
+        .doc('incident_seq_$areaCode');
+    try {
+      return await _db.runTransaction<int>((tx) async {
+        final snap = await tx.get(ref);
+        final current = (snap.data()?['value'] as int?) ?? 0;
+        final next = current + 1;
+        tx.set(
+          ref,
+          {
+            'value': next,
+            'areaCode': areaCode,
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+        return next;
+      }).timeout(const Duration(seconds: 4));
+    } catch (e) {
+      debugPrint('[IncidentService] counter transaction failed: $e');
+      return DateTime.now().millisecondsSinceEpoch % 100000;
+    }
+  }
+
+  /// Build a human-readable incident ID in the form `H-LKO-18`. Uses reverse
+  /// geocoding for the middle segment and a Firestore counter for the tail.
+  /// Collisions are guarded by an `exists()` check with a short random
+  /// fallback suffix so concurrent clients never overwrite each other.
+  static Future<String> generateReadableIncidentId(LatLng location) async {
+    final area = await _resolveAreaCode(location);
+    final seq = await _nextIncidentSeq(area);
+    var id = 'H-$area-$seq';
+    try {
+      final exists = await _db
+          .collection(_col)
+          .doc(id)
+          .get(const GetOptions(source: Source.server))
+          .timeout(const Duration(seconds: 3));
+      if (exists.exists) {
+        final rand = DateTime.now().microsecondsSinceEpoch % 1000;
+        id = 'H-$area-$seq-$rand';
+      }
+    } catch (_) {
+      // Collision check is best-effort; counter + transaction is primary guard.
+    }
+    return id;
+  }
+
   /// Creates a new SOS incident and saves to Firestore + local cache
   static Future<SosIncident> createIncident({
     required String userId,
@@ -629,8 +746,16 @@ class IncidentService {
       }
     }
 
+    String incidentId;
+    try {
+      incidentId = await generateReadableIncidentId(location);
+    } catch (e) {
+      debugPrint('[IncidentService] readable id generation failed: $e');
+      incidentId = _uuid.v4();
+    }
+
     final incident = SosIncident(
-      id: _uuid.v4(),
+      id: incidentId,
       userId: userId,
       userDisplayName: userDisplayName,
       location: location,
@@ -942,14 +1067,15 @@ class IncidentService {
     }
   }
 
-  /// Push unit GPS; when within [withinKm] of victim, set **on_scene** (once).
+  /// Push unit GPS. **On-scene** is confirmed by the driver (slide) — proximity only updates [medicalStatus] while [emsWorkflowPhase] is `inbound`.
+  /// Default [withinKm] is **0.2** (~200 m) for “near scene” hints.
   static Future<void> emsPushUnitLocationWithProximity({
     required String incidentId,
     required double unitLat,
     required double unitLng,
     required double victimLat,
     required double victimLng,
-    double withinKm = 5.0,
+    double withinKm = 0.2,
     double? headingDeg,
   }) async {
     final id = incidentId.trim();
@@ -966,15 +1092,173 @@ class IncidentService {
         'updatedAt': FieldValue.serverTimestamp(),
       };
       if (headingDeg != null) patch['ambulanceLiveHeadingDeg'] = headingDeg;
-      if (phase == 'inbound' && km <= withinKm) {
-        patch['emsWorkflowPhase'] = 'on_scene';
-        patch['emsOnSceneAt'] = FieldValue.serverTimestamp();
-        patch['medicalStatus'] =
-            'EMS on scene (~${km.toStringAsFixed(1)} km line-of-sight)';
+      if (phase == 'inbound') {
+        final m = (km * 1000).round();
+        if (km <= withinKm) {
+          patch['medicalStatus'] = m < 1000
+              ? 'Within ~$m m of scene — confirm on scene in fleet app'
+              : 'Approaching scene (~${km.toStringAsFixed(1)} km)';
+        } else {
+          patch['medicalStatus'] =
+              m < 1000 ? 'En route to scene (~$m m)' : 'En route to scene (~${km.toStringAsFixed(1)} km)';
+        }
       }
       await ref.update(patch);
     } catch (e) {
       debugPrint('[IncidentService] emsPushUnitLocationWithProximity failed: $e');
+      rethrow;
+    }
+  }
+
+  /// Fleet: same live GPS write as [emsPushUnitLocationWithProximity], plus when
+  /// `emsWorkflowPhase == returning` updates [medicalStatus] with distance to cached
+  /// `returnHospitalLat` / `returnHospitalLng` on the incident doc.
+  static Future<void> emsPushUnitLocationWithReturnProximity({
+    required String incidentId,
+    required double unitLat,
+    required double unitLng,
+    required double victimLat,
+    required double victimLng,
+    double withinKm = 0.2,
+    double? headingDeg,
+  }) async {
+    final id = incidentId.trim();
+    if (id.isEmpty) return;
+    final kmVictim = Geolocator.distanceBetween(unitLat, unitLng, victimLat, victimLng) / 1000.0;
+    try {
+      final ref = _db.collection(_col).doc(id);
+      final snap = await ref.get();
+      final data = snap.data() ?? {};
+      final phase = (data['emsWorkflowPhase'] as String?) ?? '';
+      final patch = <String, dynamic>{
+        'ambulanceLiveLat': unitLat,
+        'ambulanceLiveLng': unitLng,
+        'ambulanceLiveUpdatedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+      if (headingDeg != null) patch['ambulanceLiveHeadingDeg'] = headingDeg;
+
+      if (phase == 'inbound') {
+        final m = (kmVictim * 1000).round();
+        if (kmVictim <= withinKm) {
+          patch['medicalStatus'] = m < 1000
+              ? 'Within ~$m m of scene — confirm on scene in fleet app'
+              : 'Approaching scene (~${kmVictim.toStringAsFixed(1)} km)';
+        } else {
+          patch['medicalStatus'] = m < 1000
+              ? 'En route to scene (~$m m)'
+              : 'En route to scene (~${kmVictim.toStringAsFixed(1)} km)';
+        }
+      } else if (phase == 'returning') {
+        final hLat = (data['returnHospitalLat'] as num?)?.toDouble();
+        final hLng = (data['returnHospitalLng'] as num?)?.toDouble();
+        if (hLat != null && hLng != null) {
+          final kmH = Geolocator.distanceBetween(unitLat, unitLng, hLat, hLng) / 1000.0;
+          final mH = (kmH * 1000).round();
+          patch['medicalStatus'] = mH < 1000
+              ? 'EMS returning to hospital (~$mH m)'
+              : 'EMS returning to hospital (~${kmH.toStringAsFixed(1)} km)';
+        }
+      }
+      await ref.update(patch);
+    } catch (e) {
+      debugPrint('[IncidentService] emsPushUnitLocationWithReturnProximity failed: $e');
+      rethrow;
+    }
+  }
+
+  /// Fleet operator: driver confirms **on scene** after entering ~200 m (slide in fleet app).
+  static Future<void> markEmsOnScene({required String incidentId}) async {
+    final id = incidentId.trim();
+    if (id.isEmpty) return;
+    try {
+      final ref = _db.collection(_col).doc(id);
+      final snap = await ref.get();
+      final phase = (snap.data()?['emsWorkflowPhase'] as String?) ?? '';
+      if (phase != 'inbound') {
+        debugPrint('[IncidentService] markEmsOnScene: unexpected phase $phase');
+        return;
+      }
+      await ref.update({
+        'emsWorkflowPhase': 'on_scene',
+        'emsOnSceneAt': FieldValue.serverTimestamp(),
+        'medicalStatus': 'EMS on scene',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      await appendIncidentAuditLog(id, action: 'ems_on_scene');
+    } catch (e) {
+      debugPrint('[IncidentService] markEmsOnScene failed: $e');
+      rethrow;
+    }
+  }
+
+  /// Fleet operator: after on-scene rescue, start return leg to the accepting hospital.
+  static Future<void> markEmsRescueComplete({
+    required String incidentId,
+    required String returnHospitalId,
+    required double returnHospitalLat,
+    required double returnHospitalLng,
+  }) async {
+    final id = incidentId.trim();
+    final hid = returnHospitalId.trim();
+    if (id.isEmpty || hid.isEmpty) return;
+    try {
+      final ref = _db.collection(_col).doc(id);
+      final snap = await ref.get();
+      final phase = (snap.data()?['emsWorkflowPhase'] as String?) ?? '';
+      if (phase != 'on_scene') {
+        debugPrint('[IncidentService] markEmsRescueComplete: unexpected phase $phase');
+        return;
+      }
+      await ref.update({
+        'emsWorkflowPhase': 'returning',
+        'emsRescueCompleteAt': FieldValue.serverTimestamp(),
+        'emsReturningStartedAt': FieldValue.serverTimestamp(),
+        'returnHospitalId': hid,
+        'returnHospitalLat': returnHospitalLat,
+        'returnHospitalLng': returnHospitalLng,
+        'medicalStatus': 'EMS returning to hospital',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      await appendIncidentAuditLog(id, action: 'ems_rescue_complete');
+    } catch (e) {
+      debugPrint('[IncidentService] markEmsRescueComplete failed: $e');
+      rethrow;
+    }
+  }
+
+  /// Fleet operator: confirm arrival at hospital and close the response cycle (archives incident as resolved).
+  static Future<void> markEmsResponseComplete({required String incidentId}) async {
+    final id = incidentId.trim();
+    if (id.isEmpty) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty) {
+      debugPrint('[IncidentService] markEmsResponseComplete: no uid');
+      return;
+    }
+    try {
+      final ref = _db.collection(_col).doc(id);
+      final snap = await ref.get();
+      final phase = (snap.data()?['emsWorkflowPhase'] as String?) ?? '';
+      if (phase != 'returning') {
+        debugPrint('[IncidentService] markEmsResponseComplete: unexpected phase $phase');
+        return;
+      }
+      await ref.update({
+        'emsWorkflowPhase': 'complete',
+        'emsHospitalArrivalAt': FieldValue.serverTimestamp(),
+        'emsResponseCompleteAt': FieldValue.serverTimestamp(),
+        'medicalStatus': 'EMS response complete — at hospital',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      await appendIncidentAuditLog(id, action: 'ems_response_complete');
+      await archiveAndCloseIncident(
+        incidentId: id,
+        status: 'resolved',
+        closedByUid: uid,
+      );
+    } catch (e) {
+      debugPrint('[IncidentService] markEmsResponseComplete failed: $e');
       rethrow;
     }
   }

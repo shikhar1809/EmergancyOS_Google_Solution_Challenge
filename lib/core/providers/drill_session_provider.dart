@@ -7,6 +7,10 @@ import '../navigation/app_root_navigator_key.dart';
 class DrillSessionDashboardDemoNotifier extends Notifier<bool> {
   @override
   bool build() => false;
+
+  // ignore: use_setters_to_change_properties
+  void set(bool value) => state = value;
+  void clear() => state = false;
 }
 
 final drillSessionDashboardDemoProvider =
@@ -18,13 +22,17 @@ void clearDrillSessionDashboardDemoFromRoot() {
   if (ctx == null || !ctx.mounted) return;
   ProviderScope.containerOf(ctx, listen: false)
       .read(drillSessionDashboardDemoProvider.notifier)
-      .state = false;
+      .clear();
 }
 
 /// True after victim drill from login until practice SOS closes — shell FAB opens practice, not a live SOS.
 class DrillVictimPracticeShellNotifier extends Notifier<bool> {
   @override
   bool build() => false;
+
+  // ignore: use_setters_to_change_properties
+  void set(bool value) => state = value;
+  void clear() => state = false;
 }
 
 final drillVictimPracticeShellProvider =
@@ -36,5 +44,5 @@ void clearDrillVictimPracticeShellFromRoot() {
   if (ctx == null || !ctx.mounted) return;
   ProviderScope.containerOf(ctx, listen: false)
       .read(drillVictimPracticeShellProvider.notifier)
-      .state = false;
+      .clear();
 }

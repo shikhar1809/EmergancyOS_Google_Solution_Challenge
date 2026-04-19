@@ -1,8 +1,36 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
-/// Bundled Lifeline hero graphics (`assets/images/lifeline/1.png` … `20.png`).
-const int kLifelineBundledGraphicCount = 20;
+/// Bundled Lifeline hero graphics (`assets/images/lifeline/N.png` by level id, with overrides).
+const int kLifelineBundledGraphicCount = 31;
+
+/// Bundled PNG path for [levelId].
+///
+/// Default is `assets/images/lifeline/<id>.png`. Overrides:
+/// - [12] drowning → `27.png`
+/// - [2] basic first aid → `46.png`
+/// - [16] hypothermia & heat stroke → `45.png`
+/// - [28] heavy smoke / toxic gas → `48.png`
+/// - [30] electrocute rescue → `47.png`
+/// - [31] BASIC trauma response → `233.png`
+String lifelineBundledPngPath(int levelId) {
+  switch (levelId) {
+    case 12:
+      return 'assets/images/lifeline/27.png';
+    case 2:
+      return 'assets/images/lifeline/46.png';
+    case 16:
+      return 'assets/images/lifeline/45.png';
+    case 28:
+      return 'assets/images/lifeline/48.png';
+    case 30:
+      return 'assets/images/lifeline/47.png';
+    case 31:
+      return 'assets/images/lifeline/233.png';
+    default:
+      return 'assets/images/lifeline/$levelId.png';
+  }
+}
 
 /// Returns the appropriate visual for a Lifeline / technique ID.
 /// Bundled levels use PNG heroes; other IDs fall back to legacy vector art.
@@ -45,7 +73,7 @@ CustomPainter _legacyPainterFallback(int techniqueId, Color accent) {
 }
 
 Widget _lifelineBundledPng(int levelId, Color accent) {
-  final path = 'assets/images/lifeline/$levelId.png';
+  final path = lifelineBundledPngPath(levelId);
   return ClipRRect(
     borderRadius: BorderRadius.circular(12),
     child: Image.asset(

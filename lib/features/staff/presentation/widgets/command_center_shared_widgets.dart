@@ -2,7 +2,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/ems_workflow_labels.dart';
 import '../../../../services/incident_service.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
+
+export '../../../../core/utils/ems_workflow_labels.dart';
 
 class StatusPill extends StatelessWidget {
   const StatusPill({super.key, required this.status, this.dispatchedAccent});
@@ -40,6 +44,10 @@ String hospitalConsignmentStatusLabel(
 ]) {
   final chain = hospitalAssignmentDispatchStatus?.trim();
   if (chain == 'failed_to_assist') return 'Failed to assist';
+  final phase = e.emsWorkflowPhase?.trim();
+  if (phase != null && phase.isNotEmpty) {
+    return emsWorkflowPhaseShortLabel(phase);
+  }
   final amb = ambulanceDispatchStatus?.trim();
   if (amb != null && amb.isNotEmpty) {
     return switch (amb) {
@@ -47,14 +55,6 @@ String hospitalConsignmentStatusLabel(
       'ambulance_en_route' => 'Ambulance en route',
       'no_operator' => 'No ambulance assigned',
       _ => amb.replaceAll('_', ' '),
-    };
-  }
-  final phase = e.emsWorkflowPhase?.trim();
-  if (phase != null && phase.isNotEmpty) {
-    return switch (phase) {
-      'inbound' => 'EMS inbound',
-      'on_scene' => 'EMS on scene',
-      _ => 'EMS ${phase.replaceAll('_', ' ')}',
     };
   }
   switch (e.status) {
@@ -79,6 +79,16 @@ Color hospitalConsignmentStatusColor(
 ]) {
   final chain = hospitalAssignmentDispatchStatus?.trim();
   if (chain == 'failed_to_assist') return Colors.white54;
+  final phase = e.emsWorkflowPhase?.trim();
+  if (phase != null && phase.isNotEmpty) {
+    return switch (phase) {
+      'inbound' => const Color(0xFF58A6FF),
+      'on_scene' => Colors.tealAccent,
+      'returning' => const Color(0xFFD29922),
+      'complete' => AppColors.primarySafe,
+      _ => Colors.cyanAccent,
+    };
+  }
   final amb = ambulanceDispatchStatus?.trim();
   if (amb != null && amb.isNotEmpty) {
     return switch (amb) {
@@ -87,10 +97,6 @@ Color hospitalConsignmentStatusColor(
       'no_operator' => Colors.white54,
       _ => AppColors.accentBlue,
     };
-  }
-  final phase = e.emsWorkflowPhase?.trim();
-  if (phase != null && phase.isNotEmpty) {
-    return phase == 'on_scene' ? Colors.tealAccent : Colors.cyanAccent;
   }
   return switch (e.status) {
     IncidentStatus.pending => Colors.orangeAccent,
@@ -250,9 +256,7 @@ class OpsTopBar extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                const Text(
-                  'Overview',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 18),
+                Text(context.opsTr('Overview'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 18),
                 ),
                 const Spacer(),
                 Icon(Icons.person_outline, size: 16, color: Colors.white.withValues(alpha: 0.5)),
@@ -320,7 +324,7 @@ class OpsCollapsibleDetailPanel extends StatelessWidget {
                           ),
                         ),
                         IconButton(
-                          tooltip: 'Collapse panel',
+                          tooltip: context.opsTr('Collapse panel'),
                           onPressed: onToggleExpanded,
                           icon: const Icon(Icons.keyboard_arrow_right_rounded, color: Colors.white54),
                         ),
@@ -333,7 +337,7 @@ class OpsCollapsibleDetailPanel extends StatelessWidget {
             )
           : Center(
               child: IconButton(
-                tooltip: 'Show details',
+                tooltip: context.opsTr('Show details'),
                 onPressed: onToggleExpanded,
                 icon: Icon(Icons.keyboard_arrow_left_rounded, color: accent),
               ),

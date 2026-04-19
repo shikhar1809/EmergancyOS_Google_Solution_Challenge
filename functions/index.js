@@ -11,11 +11,14 @@ const db = admin.firestore();
 const fcm = admin.messaging();
 const { FieldValue, Timestamp } = admin.firestore;
 
+// ─── Production hospital dispatch engine (multi-factor scoring, parallel
+//     fan-out, wave escalation, multi-channel notify, load balancing).
+//     Implementation in `src/hospital_dispatch_v2.js`; legacy function names
+//     below delegate to it so every existing call site keeps working.
+const hospitalDispatchV2 = require("./src/hospital_dispatch_v2");
+
 /** Fleet operator must accept/reject a pending assignment within this window (matches client UI). */
 const FLEET_ASSIGNMENT_RESPONSE_MS = 180000;
-
-const apiKey = process.env.GEMINI_API_KEY;
-const ai = new GoogleGenAI({ apiKey });
 
 // Twilio Client Initialization
 const twilioSid = process.env.TWILIO_ACCOUNT_SID;
@@ -41,6 +44,17 @@ const lkUrl = defineString("LIVEKIT_URL", { default: "" });
 const lkHttpUrl = defineString("LIVEKIT_HTTP_URL", { default: "" });
 const lkKey = defineString("LIVEKIT_API_KEY", { default: "" });
 const lkSecret = defineSecret("LIVEKIT_API_SECRET");
+const geminiApiKeySecret = defineSecret("GEMINI_API_KEY");
+
+/** Gemini — `process.env.GEMINI_API_KEY` from local `.env.secrets` or Secret Manager on bound functions. */
+function geminiApiKey() {
+    return (process.env.GEMINI_API_KEY || "").trim();
+}
+function geminiClient() {
+    const k = geminiApiKey();
+    if (!k) return null;
+    return new GoogleGenAI({ apiKey: k });
+}
 
 const lifelineAgentName =
   process.env.LIFELINE_LIVEKIT_AGENT_NAME || process.env.LIVEKIT_AGENT_NAME || "lifeline";
@@ -333,226 +347,48 @@ function hospitalDispatchScore(c, requiredServices, emergencyType, relaxedServic
   return score;
 }
 
+/**
+ * Primary hospital dispatch entry point (legacy name kept for call-site
+ * compatibility — every caller in this file still invokes this function).
+ *
+ * Delegates to the v2 engine (`src/hospital_dispatch_v2.js`) which performs:
+ *   • multi-factor scoring (ETA, specialty match, beds, staffing, blood bank,
+ *     current load, ambulance readiness, data freshness, reliability);
+ *   • severity-tiered parallel fan-out ("waves") with first-accept-wins;
+ *   • multi-channel notification (Firestore assignment doc + per-hospital
+ *     inbox + FCM push to on-duty staff + Twilio SMS fallback);
+ *   • cross-incident load balancing so a hospital already handling several
+ *     pending cases is deprioritised.
+ *
+ * The hex grid (used by the ops dashboard ring visual) is kept available to
+ * the engine through the `hexFns` pass-through.
+ */
 async function dispatchHospitalInHex({ incidentId, incident }) {
-  const lat = incident.lat;
-  const lng = incident.lng;
-  if (!(typeof lat === "number" && typeof lng === "number")) return;
-
-  const requiredServices = mergeRequiredServicesFromIncident(incident);
-  const emergencyType = emergencyTypeLower(incident);
-
-  const incidentHex = latLngToHex(lat, lng);
-  const box = getBoundingBox(lat, lng, 60);
-
-  const hospSnap = await db
-    .collection("ops_hospitals")
-    .where("lat", ">=", box.minLat)
-    .where("lat", "<=", box.maxLat)
-    .limit(450)
-    .get();
-
-  const candidates = [];
-  for (const doc of hospSnap.docs) {
-    const h = doc.data() || {};
-    const hLat = h.lat;
-    const hLng = h.lng;
-    if (!(typeof hLat === "number" && typeof hLng === "number")) continue;
-    if (hLng < box.minLng || hLng > box.maxLng) continue;
-
-    const hex = latLngToHex(hLat, hLng);
-    const offered = Array.isArray(h.offeredServices) ? h.offeredServices.map((s) => String(s)) : [];
-    const bedsAvail = typeof h.bedsAvailable === "number" ? h.bedsAvailable : 0;
-
-    const servicesOk = requiredServices.every((rs) => offered.map((o) => o.toLowerCase()).includes(String(rs).toLowerCase()));
-    const ring = hexAxialDistance(incidentHex, hex);
-    candidates.push({
-      id: doc.id,
-      name: String(h.name || doc.id),
-      lat: hLat,
-      lng: hLng,
-      hex,
-      ring,
-      distKm: haversineKm(lat, lng, hLat, hLng),
-      bedsAvail,
-      bedsTotal: typeof h.bedsTotal === "number" ? h.bedsTotal : 0,
-      servicesOk,
-      offered,
-    });
-  }
-
-  function isEligible(c) {
-    const capOk = c.bedsAvail > 0 || c.bedsTotal === 0;
-    const svcOk = requiredServices.length === 0 ? true : c.servicesOk;
-    return capOk && svcOk;
-  }
-
-  function isEligibleCapacityOnly(c) {
-    return c.bedsAvail > 0 || c.bedsTotal === 0;
-  }
-
-  const strictEligible = candidates.filter(isEligible);
-  const relaxed = strictEligible.length === 0;
-  const eligible = relaxed ? candidates.filter(isEligibleCapacityOnly) : strictEligible;
-
-  // ── 3-tier ordering: Tier 1 (same hex), Tier 2 (rings 1-5), Tier 3 (all specialists) ──
-  const tier1 = eligible.filter((c) => c.ring === 0);
-  const tier2 = eligible.filter((c) => c.ring >= 1 && c.ring <= 5);
-  const tier3 = eligible.filter((c) => c.ring > 5);
-
-  const sortTier = (arr) => arr.sort(
-    (a, b) =>
-      hospitalDispatchScore(a, requiredServices, emergencyType, relaxed) -
-      hospitalDispatchScore(b, requiredServices, emergencyType, relaxed)
-  );
-  sortTier(tier1);
-  sortTier(tier2);
-  sortTier(tier3);
-
-  const tieredList = [...tier1, ...tier2, ...tier3];
-  const tier1EndIndex = tier1.length;
-  const tier2EndIndex = tier1.length + tier2.length;
-
-  const orderedIds = tieredList.map((c) => c.id);
-  const chain = orderedIds.slice(0, 20);
-
-  if (orderedIds.length === 0) {
-    await db.collection("ops_incident_hospital_assignments").doc(incidentId).set(
-      {
-        incidentId,
-        zoneId: OPS_ZONE_CENTER.id,
-        incidentLat: lat,
-        incidentLng: lng,
-        incidentHex,
-        requiredServices,
-        candidateHospitalIds: chain,
-        orderedHospitalIds: [],
-        notifiedHospitalIds: [],
-        dispatchStatus: "no_candidates",
-        tier1EndIndex: 0,
-        tier2EndIndex: 0,
-        assignedAt: FieldValue.serverTimestamp(),
-        reason: "no_eligible_hospital",
-        primaryHospitalId: null,
-        primaryHospitalName: null,
-        primaryDistanceKm: null,
-      },
-      { merge: true }
-    );
-    await _writeOpsDashboardAlert({
-      incidentId,
-      kind: "hospital_dispatch_failed",
-      title: "No eligible hospital found",
-      body: requiredServices.length
-        ? `No nearby hospital has capacity + required services (${requiredServices.join(", ")}).`
-        : "No nearby hospital has reported capacity.",
-      severity: "critical",
-      extra: { requiredServices, incidentHex, zoneId: OPS_ZONE_CENTER.id },
-    });
-    return;
-  }
-
-  const first = tieredList[0];
-  await db.collection("ops_incident_hospital_assignments").doc(incidentId).set(
-    {
-      incidentId,
-      zoneId: OPS_ZONE_CENTER.id,
-      incidentLat: lat,
-      incidentLng: lng,
-      incidentHex,
-      requiredServices,
-      candidateHospitalIds: chain,
-      orderedHospitalIds: orderedIds,
-      notifyIndex: 0,
-      notifiedHospitalId: first.id,
-      notifiedHospitalName: first.name,
-      notifiedHospitalLat: first.lat,
-      notifiedHospitalLng: first.lng,
-      notifiedHospitalIds: [first.id],
-      notifiedAt: FieldValue.serverTimestamp(),
-      escalateAfterMs: 120000,
-      tier1EndIndex,
-      tier2EndIndex,
-      dispatchStatus: "pending_acceptance",
-      assignedAt: FieldValue.serverTimestamp(),
-      reason: first.ring === 0 ? "in_hex" : `hex_ring_${first.ring}`,
-      primaryHospitalId: null,
-      primaryHospitalName: null,
-      primaryDistanceKm: null,
-    },
-    { merge: true }
-  );
-
-  await _writeOpsDashboardAlert({
+  return hospitalDispatchV2.dispatchHospital({
     incidentId,
-    kind: "hospital_dispatch_notify",
-    title: "Hospital dispatch — acceptance required",
-    body: `${first.name} (${first.id}) has 120s to accept this incident (hex ring ${first.ring}).`,
-    severity: "info",
-    extra: { hospitalId: first.id, hexRing: first.ring, requiredServices },
+    incident,
+    hexFns: {
+      latLngToHex,
+      hexAxialDistance,
+      zoneCenter: OPS_ZONE_CENTER,
+    },
+    writeOpsAlert: _writeOpsDashboardAlert,
   });
 }
 
+/**
+ * Moves an assignment to the next wave of hospitals when the current wave
+ * times out or is declined by all members. Legacy name kept; body delegates
+ * to the v2 engine which uses wave-based escalation with parallel fan-out
+ * (critical = 3, high = 2, standard = 1) and first-accept-wins semantics.
+ */
 async function escalateHospitalDispatchAssignment(assignmentRef, d, escalationReason) {
-  const incidentId = assignmentRef.id;
-  const ordered = Array.isArray(d.orderedHospitalIds) ? d.orderedHospitalIds.map((x) => String(x)) : [];
-  const cur = (d.notifiedHospitalId || "").toString();
-  let curIdx = ordered.indexOf(cur);
-  if (curIdx < 0) curIdx = 0;
-  const nextIdx = curIdx + 1;
-  if (nextIdx >= ordered.length) {
-    await assignmentRef.set(
-      {
-        dispatchStatus: "exhausted",
-        dispatchExhaustedAt: FieldValue.serverTimestamp(),
-        lastEscalationReason: escalationReason || "timeout",
-      },
-      { merge: true }
-    );
-    await _writeOpsDashboardAlert({
-      incidentId,
-      kind: "hospital_dispatch_exhausted",
-      title: "No hospital accepted dispatch",
-      body: "All eligible hospitals in range were notified; none accepted in time.",
-      severity: "critical",
-      extra: { zoneId: OPS_ZONE_CENTER.id },
-    });
-    return;
-  }
-  const nextId = ordered[nextIdx];
-  let nextName = nextId;
-  let nextLat = null;
-  let nextLng = null;
-  try {
-    const hs = await db.collection("ops_hospitals").doc(nextId).get();
-    if (hs.exists) {
-      const hd = hs.data() || {};
-      nextName = String(hd.name || nextId);
-      if (typeof hd.lat === "number") nextLat = hd.lat;
-      if (typeof hd.lng === "number") nextLng = hd.lng;
-    }
-  } catch (_) {}
-  await assignmentRef.set(
-    {
-      notifiedHospitalId: nextId,
-      notifiedHospitalName: nextName,
-      notifiedHospitalLat: nextLat,
-      notifiedHospitalLng: nextLng,
-      notifyIndex: nextIdx,
-      notifiedHospitalIds: FieldValue.arrayUnion(nextId),
-      notifiedAt: FieldValue.serverTimestamp(),
-      dispatchStatus: "pending_acceptance",
-      lastEscalationReason: escalationReason || "timeout",
-    },
-    { merge: true }
+  return hospitalDispatchV2.escalateAssignment(
+    assignmentRef,
+    d,
+    escalationReason,
+    _writeOpsDashboardAlert,
   );
-  await _writeOpsDashboardAlert({
-    incidentId,
-    kind: "hospital_dispatch_notify",
-    title: "Hospital dispatch — next hospital",
-    body: `${nextName} (${nextId}) — please accept or decline within 60s.`,
-    severity: "info",
-    extra: { hospitalId: nextId, notifyIndex: nextIdx },
-  });
 }
 
 /**
@@ -589,7 +425,9 @@ function timestampToMillis(value) {
 
 // ─── 1. Secure AI Triage ─────────────────────────────────────────────────────
 // Moves the Gemini API key off the Flutter client device to a secure backend.
-exports.analyzeTriageImage = onCall(async (request) => {
+exports.analyzeTriageImage = onCall(
+    { secrets: [geminiApiKeySecret] },
+    async (request) => {
     if (!request.auth) {
         throw new HttpsError("unauthenticated", "User must be authenticated.");
     }
@@ -598,7 +436,11 @@ exports.analyzeTriageImage = onCall(async (request) => {
         throw new HttpsError("invalid-argument", "Missing image or prompt");
     }
     try {
-        const response = await ai.models.generateContent({
+        const g = geminiClient();
+        if (!g) {
+            throw new HttpsError("failed-precondition", "GEMINI_API_KEY not set on server.");
+        }
+        const response = await g.models.generateContent({
             model: "gemini-2.5-flash",
             contents: [
                 prompt,
@@ -649,6 +491,7 @@ exports.lifelineChat = onCall(
         memory: "512MiB",
         timeoutSeconds: 60,
         maxInstances: 20,
+        secrets: [geminiApiKeySecret],
     },
     async (request) => {
         if (!request.auth) {
@@ -668,6 +511,7 @@ exports.lifelineChat = onCall(
             analyticsMode,
             trainingMode,
             replyLocale,
+            voiceAssistantMode,
         } = request.data || {};
         if (!message || typeof message !== "string") {
             throw new HttpsError("invalid-argument", "message required");
@@ -675,7 +519,7 @@ exports.lifelineChat = onCall(
         if (message.length > 12000) {
             throw new HttpsError("invalid-argument", "message too long");
         }
-        if (!apiKey) {
+        if (!geminiApiKey()) {
             // Gracefully report that analytics AI is offline instead of throwing.
             return {
                 status: "offline",
@@ -686,6 +530,7 @@ exports.lifelineChat = onCall(
         const scen = typeof scenario === "string" ? scenario : "General Emergency";
         const isAnalytics = analyticsMode === true;
         const isTraining = trainingMode === true;
+        const isVoiceAssistant = voiceAssistantMode === true && isTraining;
         const replyLocaleRaw =
             typeof replyLocale === "string" ? replyLocale.trim() : "";
 
@@ -722,6 +567,14 @@ exports.lifelineChat = onCall(
                 `- If the user asks anything unrelated (games, coding, politics, homework, general chat), reply with ONE short refusal sentence in their language — no other content.\n` +
                 `- Be concise: numbered steps or short bullets (about 8 lines or fewer).\n` +
                 `- Standard first-aid guidance only; do not invent dangerous treatments.\n\n`;
+            if (isVoiceAssistant) {
+                transcript +=
+                    `VOICE OUTPUT FORMAT (mandatory):\n` +
+                    `- Reply with a single JSON object only, no markdown, no code fences.\n` +
+                    `- Schema: {"spoken":"string for text-to-speech","openLibraryLevelId":number|null}\n` +
+                    `- "spoken": safe, universal first-aid guidance for text-to-speech. Keep it short: about 2–5 spoken sentences. Sound natural aloud: practical principles (safety first, when to call emergency services, what not to do) rather than long numbered step lists.\n` +
+                    `- "openLibraryLevelId": a curriculum level id from "Level N:" in the digest only if that N exists in the digest AND (the user asked to open/show/go to that topic OR your answer is mainly about that one curriculum topic). Otherwise null.\n\n`;
+            }
             if (digestRaw) {
                 transcript += `## TRAINING CURRICULUM (REFERENCE)\n${digestRaw}\n\n`;
             }
@@ -743,19 +596,28 @@ exports.lifelineChat = onCall(
         const tailLabel = isAnalytics
             ? "Respond as OPS ANALYTICS:"
             : isTraining
-              ? "Respond as LIFELINE (training):"
+              ? isVoiceAssistant
+                ? "Respond as LIFELINE (training, voice JSON only):"
+                : "Respond as LIFELINE (training):"
               : "Respond as LIFELINE:";
         transcript += `User: ${message}\n\n${tailLabel}`;
 
         try {
+            const g = geminiClient();
+            if (!g) {
+                return {
+                    status: "offline",
+                    text: "Live operations analytics AI is not configured on this project. An admin must set GEMINI_API_KEY in Cloud Functions secrets to enable it. Core metrics and maps still work without AI.",
+                };
+            }
             let response;
             const gen = isAnalytics
                 ? { maxOutputTokens: 2048, temperature: 0.3 }
                 : isTraining
-                  ? { maxOutputTokens: 640, temperature: 0.25 }
+                  ? { maxOutputTokens: isVoiceAssistant ? 720 : 640, temperature: 0.25 }
                   : { maxOutputTokens: 180, temperature: 0.2 };
             if (base64Image && typeof base64Image === "string") {
-                response = await ai.models.generateContent({
+                response = await g.models.generateContent({
                     model: "gemini-2.5-flash",
                     contents: [
                         transcript,
@@ -769,7 +631,7 @@ exports.lifelineChat = onCall(
                     generationConfig: gen,
                 });
             } else {
-                response = await ai.models.generateContent({
+                response = await g.models.generateContent({
                     model: "gemini-2.5-flash",
                     contents: transcript,
                     generationConfig: gen,
@@ -779,7 +641,26 @@ exports.lifelineChat = onCall(
                 (typeof response?.text === "function" ? response.text() : response?.text) ??
                 response?.outputText ??
                 "";
-            const trimmed = out && String(out).trim();
+            let trimmed = out && String(out).trim();
+            let openLibraryLevelId = null;
+            if (isVoiceAssistant && trimmed) {
+                try {
+                    const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+                    const jsonStr = jsonMatch ? jsonMatch[0] : trimmed;
+                    const parsed = JSON.parse(jsonStr);
+                    if (parsed && typeof parsed.spoken === "string") {
+                        const spoken = String(parsed.spoken).trim();
+                        if (spoken.length) trimmed = spoken;
+                        if (parsed.openLibraryLevelId === null || parsed.openLibraryLevelId === undefined) {
+                            openLibraryLevelId = null;
+                        } else if (typeof parsed.openLibraryLevelId === "number" && Number.isFinite(parsed.openLibraryLevelId)) {
+                            openLibraryLevelId = Math.round(parsed.openLibraryLevelId);
+                        }
+                    }
+                } catch (e) {
+                    console.warn("[lifelineChat] voice JSON parse failed, using raw text:", e && e.message);
+                }
+            }
             // FIX 8: Cache successful non-analytics, non-training responses to serve on rate-limit.
             if (!isAnalytics && !isTraining && trimmed && trimmed.length > 20) {
                 try {
@@ -790,10 +671,14 @@ exports.lifelineChat = onCall(
                     ).catch(() => {});
                 } catch (_) {}
             }
-            return {
+            const payload = {
                 status: "ok",
                 text: (trimmed && trimmed.length ? trimmed : "Call emergency services (112) if unsure."),
             };
+            if (isVoiceAssistant) {
+                payload.openLibraryLevelId = openLibraryLevelId;
+            }
+            return payload;
         } catch (e) {
             console.error("[lifelineChat] Gemini error:", e);
             const msg = (e && (e.message || e.toString && e.toString())) ? String(e.message || e.toString()) : "AI request failed";
@@ -822,6 +707,206 @@ exports.lifelineChat = onCall(
             }
             throw new HttpsError("internal", msg || "AI request failed");
         }
+    }
+);
+
+const HEALTH_ALERT_CACHE_MS = 6 * 60 * 60 * 1000;
+
+function iso2ToIso3(iso2) {
+    const m = {
+        IN: "IND",
+        US: "USA",
+        GB: "GBR",
+        BD: "BGD",
+        PK: "PAK",
+        ID: "IDN",
+        NG: "NGA",
+        BR: "BRA",
+        MX: "MEX",
+        CN: "CHN",
+        JP: "JPN",
+        AU: "AUS",
+        DE: "DEU",
+        FR: "FRA",
+    };
+    const k = String(iso2 || "")
+        .trim()
+        .toUpperCase();
+    return m[k] || "IND";
+}
+
+/** ReliefWeb disasters (structured) — filter to outbreak/epidemic-like types when possible. */
+async function fetchReliefWebOutbreaksForCountry(iso3) {
+    const postBody = JSON.stringify({
+        appname: "emergencyos",
+        limit: 35,
+        preset: "latest",
+        filter: {
+            operator: "AND",
+            conditions: [
+                { field: "primary_country.iso3", value: iso3 },
+                { field: "status", value: "current" },
+            ],
+        },
+        fields: {
+            include: ["name", "description", "date", "primary_country", "url", "primary_type"],
+        },
+    });
+    const res = await fetch("https://api.reliefweb.int/v1/disasters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: postBody,
+    });
+    if (!res.ok) {
+        throw new Error(`ReliefWeb HTTP ${res.status}`);
+    }
+    const json = await res.json();
+    const data = json && json.data;
+    if (!Array.isArray(data)) return [];
+    const keywords = /outbreak|epidemic|disease|ebola|cholera|measles|dengue|malaria|zika|covid|virus|infection|plague|polio|meningitis|yellow fever|mpox|monkeypox/i;
+    const out = [];
+    for (const row of data) {
+        const fields = row.fields || {};
+        const name = String(fields.name || "Health event").trim();
+        const desc = String(fields.description || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        const type = String(fields.primary_type || fields.type || "");
+        const blob = `${name} ${desc} ${type}`;
+        if (!keywords.test(blob) && !/outbreak|epidemic/i.test(type)) continue;
+        const country = (fields.primary_country && fields.primary_country.name) || iso3;
+        const dateRaw =
+            (fields.date && (fields.date.created || fields.date.changed)) ||
+            fields.changed ||
+            null;
+        const d = dateRaw ? new Date(dateRaw) : new Date();
+        out.push({
+            disease: name.slice(0, 120),
+            severity: /severe|critical|ebola|cholera/i.test(blob) ? "High" : "Medium",
+            affectedArea: country,
+            description: (desc || name).slice(0, 400),
+            precautions: [],
+            source: "ReliefWeb",
+            reportedDate: d.toISOString(),
+            reportedCases: null,
+            advisoryLevel: "Advisory",
+        });
+        if (out.length >= 6) break;
+    }
+    return out;
+}
+
+/** Gemini + Google Search fallback — returns normalized outbreak objects or []. */
+async function fetchGeminiSearchOutbreaks(lat, lng, countryLabel) {
+    const g = geminiClient();
+    if (!g) return [];
+    const prompt =
+        `You are summarizing recent PUBLIC disease outbreak / epidemic / notable infectious disease alerts ` +
+        `relevant to the region at latitude ${lat}, longitude ${lng} (${countryLabel}). ` +
+        `Use Google Search. Return ONLY valid JSON (no markdown): ` +
+        `{"items":[{"disease":"short title","description":"one or two sentences","severity":"Low|Medium|High|Critical",` +
+        `"affectedArea":"place","precautions":["optional"],"source":"publisher name","advisoryLevel":"Advisory","reportedCases":null}]}. ` +
+        `Max 4 items. If nothing credible in the last ~90 days, return {"items":[]}. ` +
+        `Do not invent specific case counts.`;
+    try {
+        const response = await g.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+            config: {
+                maxOutputTokens: 2048,
+                temperature: 0.2,
+                tools: [{ googleSearch: {} }],
+            },
+        });
+        const raw =
+            (typeof response?.text === "function" ? response.text() : response?.text) ??
+            response?.outputText ??
+            "";
+        const t = String(raw || "").trim();
+        const m = t.match(/\{[\s\S]*\}/);
+        const parsed = JSON.parse(m ? m[0] : t);
+        const items = parsed && Array.isArray(parsed.items) ? parsed.items : [];
+        return items
+            .filter((x) => x && typeof x.disease === "string")
+            .map((x) => ({
+                disease: String(x.disease).slice(0, 120),
+                severity: String(x.severity || "Medium"),
+                affectedArea: String(x.affectedArea || countryLabel).slice(0, 120),
+                description: String(x.description || "").slice(0, 400),
+                precautions: Array.isArray(x.precautions) ? x.precautions.map((p) => String(p)).slice(0, 3) : [],
+                source: "Web summary (verify): " + String(x.source || "search"),
+                reportedDate: new Date().toISOString(),
+                reportedCases: x.reportedCases != null ? x.reportedCases : null,
+                advisoryLevel: String(x.advisoryLevel || "Search"),
+            }))
+            .slice(0, 4);
+    } catch (e) {
+        console.warn("[getRegionalHealthAlerts] Gemini search fallback failed:", e && e.message);
+        return [];
+    }
+}
+
+exports.getRegionalHealthAlerts = onCall(
+    {
+        cors: true,
+        memory: "512MiB",
+        timeoutSeconds: 90,
+        maxInstances: 10,
+        secrets: [geminiApiKeySecret],
+    },
+    async (request) => {
+        if (!request.auth) {
+            throw new HttpsError("unauthenticated", "Authentication required");
+        }
+        const { lat, lng, countryCode } = request.data || {};
+        const la = Number(lat);
+        const ln = Number(lng);
+        if (!Number.isFinite(la) || !Number.isFinite(ln) || Math.abs(la) > 90 || Math.abs(ln) > 180) {
+            throw new HttpsError("invalid-argument", "lat and lng required");
+        }
+        const iso2 = typeof countryCode === "string" && countryCode.trim().length === 2 ? countryCode.trim().toUpperCase() : "IN";
+        const iso3 = iso2ToIso3(iso2);
+        const cacheKey = `h_${iso3}_${Math.round(la * 20) / 20}_${Math.round(ln * 20) / 20}`;
+        try {
+            const cref = db.collection("regional_health_alerts_cache").doc(cacheKey);
+            const snap = await cref.get();
+            if (snap.exists) {
+                const d = snap.data() || {};
+                const ageMs = Date.now() - (d.cachedAt?.toMillis?.() ?? 0);
+                if (ageMs >= 0 && ageMs < HEALTH_ALERT_CACHE_MS && Array.isArray(d.outbreaks)) {
+                    return { status: "ok", outbreaks: d.outbreaks, source: d.source || "cached" };
+                }
+            }
+        } catch (_) {}
+
+        let outbreaks = [];
+        let source = "reliefweb";
+        try {
+            outbreaks = await fetchReliefWebOutbreaksForCountry(iso3);
+        } catch (e) {
+            console.warn("[getRegionalHealthAlerts] ReliefWeb error:", e && e.message);
+            outbreaks = [];
+        }
+        if (!outbreaks.length) {
+            outbreaks = await fetchGeminiSearchOutbreaks(la, ln, iso2);
+            source = outbreaks.length ? "gemini_search" : "none";
+        }
+        try {
+            await db
+                .collection("regional_health_alerts_cache")
+                .doc(cacheKey)
+                .set(
+                    {
+                        outbreaks,
+                        source,
+                        cachedAt: FieldValue.serverTimestamp(),
+                        lat: la,
+                        lng: ln,
+                        iso2,
+                    },
+                    { merge: true }
+                );
+        } catch (_) {}
+
+        return { status: "ok", outbreaks, source };
     }
 );
 
@@ -1485,6 +1570,7 @@ exports.analyzeIncidentVideo = onCall(
     memory: "1GiB",
     timeoutSeconds: 120,
     maxInstances: 10,
+    secrets: [geminiApiKeySecret],
   },
   async (request) => {
     if (!request.auth) {
@@ -1503,7 +1589,8 @@ exports.analyzeIncidentVideo = onCall(
       throw new HttpsError("permission-denied", "Only accepted volunteers can submit incident video.");
     }
 
-    if (!apiKey) {
+    const gVideo = geminiClient();
+    if (!gVideo) {
       throw new HttpsError("failed-precondition", "GEMINI_API_KEY not set on server.");
     }
 
@@ -1529,7 +1616,7 @@ exports.analyzeIncidentVideo = onCall(
 
     let text = "";
     try {
-      const response = await ai.models.generateContent({
+      const response = await gVideo.models.generateContent({
         model: "gemini-2.5-flash",
         contents: [prompt, { inlineData: { data: b64, mimeType: "video/mp4" } }],
       });
@@ -1686,7 +1773,7 @@ async function generateSituationBriefCore(incidentId, { force } = {}) {
   }
   const fp = decision.fp;
 
-  if (!apiKey) {
+  if (!geminiApiKey()) {
     const merged = {
       ...existingBrief,
       status: "error",
@@ -1726,7 +1813,8 @@ async function generateSituationBriefCore(incidentId, { force } = {}) {
 
   let text = "";
   try {
-    const response = await ai.models.generateContent({
+    const gBrief = geminiClient();
+    const response = await gBrief.models.generateContent({
       model: "gemini-2.5-flash",
       contents,
       generationConfig: { maxOutputTokens: 1200, temperature: 0.2 },
@@ -1795,7 +1883,7 @@ async function callerMayRefreshSituationBrief(uid, inc) {
     // FIX 4: Emergency bridge desk → allowed.
     if (ud.emergencyBridgeDesk === true) return true;
     // FIX 4: Hospital staff linked to this incident → allowed.
-    const staffHospId = (ud.staffHospitalId || "").toString().trim();
+    const staffHospId = (ud.staffHospitalId || ud.boundHospitalDocId || "").toString().trim();
     if (staffHospId) {
       const incId = (inc.id || "").toString();
       if (incId) {
@@ -1818,6 +1906,7 @@ exports.generateSituationBriefForIncident = onCall(
     memory: "1GiB",
     timeoutSeconds: 120,
     maxInstances: 8,
+    secrets: [geminiApiKeySecret],
   },
   async (request) => {
     if (!request.auth) {
@@ -1846,6 +1935,7 @@ exports.refreshSituationBriefsScheduled = onSchedule(
     memory: "512MiB",
     cpu: 0.25,
     timeoutSeconds: 300,
+    secrets: [geminiApiKeySecret],
   },
   async () => {
     const col = db.collection("sos_incidents");
@@ -1891,78 +1981,51 @@ exports.acceptHospitalDispatch = onCall(
   if (!isMaster) {
     const callerSnap = await db.collection("users").doc(request.auth.uid).get();
     const callerDoc = callerSnap.exists ? (callerSnap.data() || {}) : {};
-    const callerHospital = (callerDoc.staffHospitalId || "").toString().trim();
+    const callerHospital = (
+      (callerDoc.staffHospitalId || callerDoc.boundHospitalDocId || "") + ""
+    )
+      .toString()
+      .trim();
     if (callerHospital !== hospitalId) {
       throw new HttpsError(
         "permission-denied",
         "You must be registered as staff at this hospital. " +
-        "Contact your ops admin to assign staffHospitalId on your profile."
+        "Contact your ops admin to set staffHospitalId (or boundHospitalDocId) on your user profile to match this facility."
       );
     }
   }
 
-  const ref = db.collection("ops_incident_hospital_assignments").doc(incidentId);
-  await db.runTransaction(async (t) => {
-    const snap = await t.get(ref);
-    if (!snap.exists) throw new HttpsError("not-found", "Assignment not found.");
-    const d = snap.data() || {};
-    const status = (d.dispatchStatus || "").toString();
-    if (status === "accepted") {
-      throw new HttpsError("failed-precondition", "Incident already accepted by a hospital.");
-    }
-    if (status !== "pending_acceptance") {
-      throw new HttpsError(
-        "failed-precondition",
-        "Hospital dispatch is not awaiting acceptance."
-      );
-    }
-    const notified = (d.notifiedHospitalId || "").toString();
-    if (notified !== hospitalId) {
-      throw new HttpsError("permission-denied", "Only the currently notified hospital can accept.");
-    }
-    let hname = hospitalId;
-    let hLat = null;
-    let hLng = null;
-    const hs = await t.get(db.collection("ops_hospitals").doc(hospitalId));
-    if (hs.exists) {
-      const hd = hs.data() || {};
-      hname = String(hd.name || hospitalId);
-      if (typeof hd.lat === "number") hLat = hd.lat;
-      if (typeof hd.lng === "number") hLng = hd.lng;
-    }
-    t.set(
-      ref,
-      {
-        dispatchStatus: "accepted",
-        acceptedHospitalId: hospitalId,
-        acceptedHospitalName: hname,
-        acceptedHospitalLat: hLat,
-        acceptedHospitalLng: hLng,
-        acceptedAt: FieldValue.serverTimestamp(),
-        acceptedByUid: request.auth.uid,
-        primaryHospitalId: hospitalId,
-        primaryHospitalName: hname,
-        reason: "accepted",
-      },
-      { merge: true }
-    );
-  });
-  let hnameOut = hospitalId;
+  // ── Engine transaction: accepts iff hospital is in the current wave (handles
+  //    parallel fan-out for critical/high severity with first-accept-wins). ──
+  let acceptedMeta;
   try {
-    const hs = await db.collection("ops_hospitals").doc(hospitalId).get();
-    if (hs.exists) hnameOut = String(hs.data()?.name || hospitalId);
-  } catch (_) {}
+    acceptedMeta = await hospitalDispatchV2.acceptAssignmentTx(
+      incidentId,
+      hospitalId,
+      request.auth.uid,
+    );
+  } catch (e) {
+    const codeMap = {
+      not_found: ["not-found", "Assignment not found."],
+      already_accepted: ["failed-precondition", "Incident already accepted by another hospital."],
+      wrong_status: ["failed-precondition", "Hospital dispatch is not awaiting acceptance."],
+      not_member: ["permission-denied", "Only hospitals currently notified for this incident can accept."],
+    };
+    const [code, msg] = codeMap[e && e.code] || ["internal", e && e.message ? String(e.message) : "accept failed"];
+    throw new HttpsError(code, msg);
+  }
+
   await db.collection("sos_incidents").doc(incidentId).set(
     {
       assignedHospitalId: hospitalId,
-      assignedHospitalName: hnameOut,
+      assignedHospitalName: acceptedMeta.name || hospitalId,
       ambulanceAssignedAt: FieldValue.serverTimestamp(),
       medicalStatus: "Hospital accepted — coordinating ambulance",
       updatedAt: FieldValue.serverTimestamp(),
     },
     { merge: true }
   );
-  return { ok: true };
+  return { ok: true, hospitalName: acceptedMeta.name || hospitalId };
   }
 );
 
@@ -1990,7 +2053,11 @@ exports.declineHospitalDispatch = onCall(
   if (!isMasterDecline) {
     const callerSnapD = await db.collection("users").doc(request.auth.uid).get();
     const callerDocD = callerSnapD.exists ? (callerSnapD.data() || {}) : {};
-    const callerHospitalD = (callerDocD.staffHospitalId || "").toString().trim();
+    const callerHospitalD = (
+      (callerDocD.staffHospitalId || callerDocD.boundHospitalDocId || "") + ""
+    )
+      .toString()
+      .trim();
     if (callerHospitalD !== hospitalId) {
       throw new HttpsError(
         "permission-denied",
@@ -1999,18 +2066,27 @@ exports.declineHospitalDispatch = onCall(
     }
   }
 
-  const ref = db.collection("ops_incident_hospital_assignments").doc(incidentId);
-  const snap = await ref.get();
-  if (!snap.exists) throw new HttpsError("not-found", "Assignment not found.");
-  const d = snap.data() || {};
-  if ((d.notifiedHospitalId || "").toString() !== hospitalId) {
-    throw new HttpsError("permission-denied", "Only the notified hospital can decline.");
+  // ── Engine: parallel-wave aware. A single decline among multiple notified
+  //    hospitals does NOT escalate — it just marks this member declined. The
+  //    wave escalates only when every member has declined OR the timer fires. ──
+  try {
+    const res = await hospitalDispatchV2.declineAssignmentMember(
+      incidentId,
+      hospitalId,
+      (request.data?.reason || "declined").toString(),
+      _writeOpsDashboardAlert,
+    );
+    return { ok: true, status: res && res.status ? res.status : "declined" };
+  } catch (e) {
+    const codeMap = {
+      not_found: ["not-found", "Assignment not found."],
+      already_accepted: ["failed-precondition", "Already accepted."],
+      wrong_status: ["failed-precondition", "Hospital dispatch is not awaiting acceptance."],
+      not_member: ["permission-denied", "Only hospitals currently notified for this incident can decline."],
+    };
+    const [code, msg] = codeMap[e && e.code] || ["internal", e && e.message ? String(e.message) : "decline failed"];
+    throw new HttpsError(code, msg);
   }
-  if ((d.dispatchStatus || "").toString() === "accepted") {
-    throw new HttpsError("failed-precondition", "Already accepted.");
-  }
-  await escalateHospitalDispatchAssignment(ref, d, "declined");
-  return { ok: true };
   }
 );
 
@@ -2058,23 +2134,13 @@ exports.hospitalDispatchEscalation = onSchedule(
     timeoutSeconds: 120,
   },
   async () => {
-    const snap = await db
-      .collection("ops_incident_hospital_assignments")
-      .where("dispatchStatus", "==", "pending_acceptance")
-      .limit(50)
-      .get();
-    if (snap.empty) return;
-    const now = Date.now();
-    for (const doc of snap.docs) {
-      const d = doc.data() || {};
-      const ms = timestampToMillis(d.notifiedAt);
-      const waitMs = typeof d.escalateAfterMs === "number" ? d.escalateAfterMs : 120000;
-      if (!ms || now - ms < waitMs) continue;
-      try {
-        await escalateHospitalDispatchAssignment(doc.ref, d, "timeout");
-      } catch (e) {
-        console.error("[hospitalDispatchEscalation]", doc.id, e);
+    try {
+      const res = await hospitalDispatchV2.runScheduledEscalation(_writeOpsDashboardAlert);
+      if (res.processed > 0) {
+        console.log(`[hospitalDispatchEscalation] processed=${res.processed} escalated=${res.escalated}`);
       }
+    } catch (e) {
+      console.error("[hospitalDispatchEscalation] scheduler:", e);
     }
   }
 );
@@ -3577,4 +3643,117 @@ exports.opsSupportForceSignOut = onCall(
     return { ok: true };
     }
 );
+
+// ─── Master dashboard health probe ───────────────────────────────────────────
+// Called by MasterDashboardHealthBar / OpsSystemHealthService.fetch().
+// Performs lightweight checks: Firestore read, LiveKit env presence, Twilio env presence.
+exports.getOpsSystemHealth = onCall(
+    { cors: true, memory: "256MiB", timeoutSeconds: 30 },
+    async (request) => {
+        if (!request.auth) {
+            throw new HttpsError("unauthenticated", "Sign in required to check system health.");
+        }
+
+        const now = Date.now();
+        const results = { ok: true, services: {}, summary: "", checkedAt: now };
+
+        // 1. GCP / Firestore probe — try a lightweight read from a known collection.
+        try {
+            await db.collection("ops_system_health_probe").limit(1).get();
+            results.services.gcp = { ok: true, label: "GCP / Firestore", detail: "Firestore reachable and responding." };
+        } catch (e) {
+            results.services.gcp = { ok: false, label: "GCP / Firestore", detail: `Firestore probe failed: ${e && e.message ? e.message : String(e)}` };
+            results.ok = false;
+        }
+
+        // 2. LiveKit — check environment configuration (no network round-trip needed for health bar).
+        try {
+            const env = liveKitEnv(null); // no secret binding at top level; rely on env vars
+            const lkOk = !!(env.url && env.apiKey && env.apiSecret);
+            results.services.livekit = {
+                ok: lkOk,
+                label: "LiveKit (WebRTC)",
+                detail: lkOk
+                    ? "LiveKit URL, API key, and secret are configured."
+                    : "LiveKit not fully configured — set LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET.",
+            };
+            if (!lkOk) results.ok = false;
+        } catch (e) {
+            results.services.livekit = { ok: false, label: "LiveKit (WebRTC)", detail: `Config error: ${e && e.message ? e.message : String(e)}` };
+            results.ok = false;
+        }
+
+        // 3. SMS / Twilio — optional; only flags if partially configured (SID without token, etc.).
+        const hasSid = !!(process.env.TWILIO_ACCOUNT_SID || "").trim();
+        const hasToken = !!(process.env.TWILIO_AUTH_TOKEN || "").trim();
+        const hasNumber = !!(process.env.TWILIO_PHONE_NUMBER || "").trim();
+        const smsConfigured = hasSid && hasToken && hasNumber;
+        const smsPartial = (hasSid || hasToken || hasNumber) && !smsConfigured;
+        results.services.sms = {
+            ok: smsConfigured || (!hasSid && !hasToken && !hasNumber), // OK if fully configured or fully absent
+            label: "SMS (Twilio)",
+            detail: smsConfigured
+                ? "Twilio SID, auth token, and phone number are set."
+                : smsPartial
+                ? "Twilio partially configured — set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER."
+                : "SMS relay not configured (optional — alerts sent via app push only).",
+        };
+
+        // Build summary.
+        const failing = Object.values(results.services).filter((s) => !s.ok).map((s) => s.label);
+        results.summary = failing.length === 0
+            ? "All systems operational."
+            : `Issue(s) detected: ${failing.join(", ")}.`;
+
+        return results;
+    }
+);
+
+// ─── Hospital (medical) dashboard health probe ────────────────────────────────
+// Called by OpsDataPlaneHealthService.fetch() — redacted view (no SMS internals).
+exports.getOpsDataPlaneHealth = onCall(
+    { cors: true, memory: "256MiB", timeoutSeconds: 30 },
+    async (request) => {
+        if (!request.auth) {
+            throw new HttpsError("unauthenticated", "Sign in required to check system health.");
+        }
+
+        const now = Date.now();
+        const results = { ok: true, services: {}, summary: "", checkedAt: now };
+
+        // 1. Firestore probe.
+        try {
+            await db.collection("ops_system_health_probe").limit(1).get();
+            results.services.firestore = { ok: true, label: "GCP / Firestore", detail: "Firestore reachable." };
+        } catch (e) {
+            results.services.firestore = { ok: false, label: "GCP / Firestore", detail: `Firestore probe failed: ${e && e.message ? e.message : String(e)}` };
+            results.ok = false;
+        }
+
+        // 2. LiveKit env check.
+        try {
+            const env = liveKitEnv(null);
+            const lkOk = !!(env.url && env.apiKey && env.apiSecret);
+            results.services.livekit = {
+                ok: lkOk,
+                label: "LiveKit (WebRTC)",
+                detail: lkOk ? "LiveKit configured." : "LiveKit not fully configured.",
+            };
+            if (!lkOk) results.ok = false;
+        } catch (e) {
+            results.services.livekit = { ok: false, label: "LiveKit (WebRTC)", detail: `Config error: ${e && e.message ? e.message : String(e)}` };
+            results.ok = false;
+        }
+
+        const failing = Object.values(results.services).filter((s) => !s.ok).map((s) => s.label);
+        results.summary = failing.length === 0
+            ? "Data plane operational."
+            : `Issue(s): ${failing.join(", ")}.`;
+
+        return results;
+    }
+);
+
+const cloudTts = require("./src/cloud_tts");
+exports.synthesizeSpeech = cloudTts.synthesizeSpeech;
 

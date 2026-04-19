@@ -197,7 +197,7 @@ class _SosQuickIntakePageState extends ConsumerState<SosQuickIntakePage>
           SnackBar(
             content: Text(
               loc.quickSosFailed(
-                e is StateError ? (e.message ?? '') : loc.sosCheckConnectionRetry,
+                e is StateError ? e.message : loc.sosCheckConnectionRetry,
               ),
             ),
             backgroundColor: AppColors.primaryDanger,
@@ -216,7 +216,7 @@ class _SosQuickIntakePageState extends ConsumerState<SosQuickIntakePage>
 
     if (!context.mounted) return;
     final id = createdId;
-    if (id != null && id.isNotEmpty) {
+    if (id.isNotEmpty) {
       context.go('/sos-active/${Uri.encodeComponent(id)}');
     } else {
       if (kIsWeb) VoiceCommsService.discardSosVoicePriming();

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../../services/fleet_operator_handoff_service.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 const int _kMaxHandoffPhotos = 8;
 
@@ -41,12 +42,10 @@ class FleetOperatorHandoffSection extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
               icon: const Icon(Icons.edit_note_rounded, size: 22),
-              label: const Text(
-                'Edit handoff report',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+              label: Text(context.opsTr('Edit handoff report'), style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
               ),
             ),
-            if (hasContent && draft != null) ...[
+            if (hasContent) ...[
               const SizedBox(height: 12),
               _HandoffDraftPreview(draft: draft),
             ],
@@ -91,9 +90,7 @@ class _HandoffDraftPreview extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
-            'Your handoff notes',
-            style: TextStyle(
+          Text(context.opsTr('Your handoff notes'), style: TextStyle(
               color: Color(0xFF79C0FF),
               fontSize: 12,
               fontWeight: FontWeight.w800,
@@ -234,8 +231,8 @@ class _FleetOperatorHandoffEditorSheetState extends State<_FleetOperatorHandoffE
       if (mounted) {
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Handoff report saved'),
+          SnackBar(
+            content: Text(context.opsTr('Handoff report saved')),
             backgroundColor: Color(0xFF238636),
           ),
         );
@@ -272,18 +269,14 @@ class _FleetOperatorHandoffEditorSheetState extends State<_FleetOperatorHandoffE
               ),
             ),
             const SizedBox(height: 12),
-            const Text(
-              'Edit handoff report',
-              style: TextStyle(
+            Text(context.opsTr('Edit handoff report'), style: TextStyle(
                 color: Colors.white,
                 fontSize: 18,
                 fontWeight: FontWeight.w800,
               ),
             ),
             const SizedBox(height: 4),
-            const Text(
-              'Notes for receiving physician / hospital. Photos are stored securely for this incident.',
-              style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.35),
+            Text(context.opsTr('Notes for receiving physician / hospital. Photos are stored securely for this incident.'), style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.35),
             ),
             const SizedBox(height: 14),
             TextField(
@@ -291,7 +284,7 @@ class _FleetOperatorHandoffEditorSheetState extends State<_FleetOperatorHandoffE
               maxLines: 8,
               style: const TextStyle(color: Colors.white70, fontSize: 14),
               decoration: InputDecoration(
-                hintText: 'Situation, background, assessment, recommendation…',
+                hintText: context.opsTr('Situation, background, assessment, recommendation…'),
                 hintStyle: const TextStyle(color: Colors.white38),
                 filled: true,
                 fillColor: const Color(0xFF0D1117),
@@ -360,7 +353,7 @@ class _FleetOperatorHandoffEditorSheetState extends State<_FleetOperatorHandoffE
                       width: 22,
                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                     )
-                  : const Text('Save', style: TextStyle(fontWeight: FontWeight.w800)),
+                  : Text(context.opsTr('Save'), style: TextStyle(fontWeight: FontWeight.w800)),
             ),
           ],
         ),

@@ -24,7 +24,7 @@ class _VolunteerDetailsScreenState
   bool _aedCertified = false;
   bool _uploadingCprCert = false;
   bool _uploadingAedCert = false;
-  bool _emergencyBridgeDesk = false;
+  final bool _emergencyBridgeDesk = false;
   bool _isSaving = false;
 
   String _contentTypeForExtension(String ext) {

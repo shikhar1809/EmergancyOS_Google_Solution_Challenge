@@ -1,5 +1,3 @@
-import 'dart:js_interop';
-
 void getNearbyPlacesJsonImpl(
   double lat,
   double lng,

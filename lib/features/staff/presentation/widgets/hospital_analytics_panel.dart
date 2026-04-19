@@ -3,6 +3,7 @@ import 'package:fl_chart/fl_chart.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../services/ops_hospital_service.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 class HospitalAnalyticsPanel extends StatelessWidget {
   const HospitalAnalyticsPanel({
@@ -23,7 +24,7 @@ class HospitalAnalyticsPanel extends StatelessWidget {
         : hospitals;
 
     if (filtered.isEmpty) {
-      return _buildEmptyState();
+      return _buildEmptyState(context);
     }
 
     return SingleChildScrollView(
@@ -31,18 +32,18 @@ class HospitalAnalyticsPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildHeader(),
+          _buildHeader(context),
           const SizedBox(height: 20),
-          if (isMasterView) _buildMasterSummary(filtered),
+          if (isMasterView) _buildMasterSummary(context, filtered),
           if (!isMasterView && filtered.length == 1) ...[
             _buildHospitalDetail(filtered.first),
             const SizedBox(height: 20),
-            _buildCapacityGauge(filtered.first),
+            _buildCapacityGauge(context, filtered.first),
             const SizedBox(height: 20),
             if (filtered.first.offeredServices.isNotEmpty)
-              _buildServiceList(filtered.first.offeredServices),
+              _buildServiceList(context, filtered.first.offeredServices),
             const SizedBox(height: 20),
-            _buildStaffOverview(filtered.first),
+            _buildStaffOverview(context, filtered.first),
           ],
           if (!isMasterView && filtered.length > 1)
             _buildHospitalList(filtered),
@@ -51,7 +52,7 @@ class HospitalAnalyticsPanel extends StatelessWidget {
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -59,20 +60,20 @@ class HospitalAnalyticsPanel extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
-      child: const Column(
+      child: Column(
         children: [
-          Icon(Icons.local_hospital, color: Colors.white24, size: 40),
-          SizedBox(height: 12),
+          const Icon(Icons.local_hospital, color: Colors.white24, size: 40),
+          const SizedBox(height: 12),
           Text(
-            'No hospital data available',
-            style: TextStyle(color: Colors.white54, fontSize: 13),
+            context.opsTr('No hospital data available'),
+            style: const TextStyle(color: Colors.white54, fontSize: 13),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(BuildContext context) {
     return Row(
       children: [
         Container(
@@ -109,7 +110,7 @@ class HospitalAnalyticsPanel extends StatelessWidget {
     );
   }
 
-  Widget _buildMasterSummary(List<OpsHospitalRow> hospitals) {
+  Widget _buildMasterSummary(BuildContext context, List<OpsHospitalRow> hospitals) {
     final totalBeds = hospitals.fold<int>(0, (sum, h) => sum + h.bedsTotal);
     final availBeds = hospitals.fold<int>(0, (sum, h) => sum + h.bedsAvailable);
     final totalDocs = hospitals.fold<int>(0, (sum, h) => sum + h.doctorsOnDuty);
@@ -169,14 +170,14 @@ class HospitalAnalyticsPanel extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 10),
-        _buildOccupancyOverview(hospitals),
+        _buildOccupancyOverview(context, hospitals),
         const SizedBox(height: 20),
         _buildServiceBreakdown(hospitals),
       ],
     );
   }
 
-  Widget _buildOccupancyOverview(List<OpsHospitalRow> hospitals) {
+  Widget _buildOccupancyOverview(BuildContext context, List<OpsHospitalRow> hospitals) {
     final occupancyValues = hospitals
         .where((h) => h.bedsTotal > 0)
         .map((h) => (h.bedsTotal - h.bedsAvailable) / h.bedsTotal)
@@ -213,9 +214,7 @@ class HospitalAnalyticsPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'NETWORK OCCUPANCY',
-            style: TextStyle(
+          Text(context.opsTr('NETWORK OCCUPANCY'), style: TextStyle(
               color: Colors.white38,
               fontSize: 10,
               fontWeight: FontWeight.w700,
@@ -511,7 +510,7 @@ class HospitalAnalyticsPanel extends StatelessWidget {
     );
   }
 
-  Widget _buildCapacityGauge(OpsHospitalRow h) {
+  Widget _buildCapacityGauge(BuildContext context, OpsHospitalRow h) {
     final used = h.bedsTotal - h.bedsAvailable;
     final percent = h.bedsTotal > 0 ? used / h.bedsTotal : 0.0;
     final color = percent > 0.85
@@ -532,9 +531,7 @@ class HospitalAnalyticsPanel extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'BED OCCUPANCY',
-                  style: TextStyle(
+                Text(context.opsTr('BED OCCUPANCY'), style: TextStyle(
                     color: Colors.white38,
                     fontSize: 10,
                     fontWeight: FontWeight.w700,
@@ -597,7 +594,7 @@ class HospitalAnalyticsPanel extends StatelessWidget {
     );
   }
 
-  Widget _buildStaffOverview(OpsHospitalRow h) {
+  Widget _buildStaffOverview(BuildContext context, OpsHospitalRow h) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -607,9 +604,7 @@ class HospitalAnalyticsPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'STAFFING',
-            style: TextStyle(
+          Text(context.opsTr('STAFFING'), style: TextStyle(
               color: Colors.white38,
               fontSize: 10,
               fontWeight: FontWeight.w700,
@@ -668,7 +663,7 @@ class HospitalAnalyticsPanel extends StatelessWidget {
     );
   }
 
-  Widget _buildServiceList(List<String> services) {
+  Widget _buildServiceList(BuildContext context, List<String> services) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -678,9 +673,7 @@ class HospitalAnalyticsPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'AVAILABLE SERVICES',
-            style: TextStyle(
+          Text(context.opsTr('AVAILABLE SERVICES'), style: TextStyle(
               color: Colors.white38,
               fontSize: 10,
               fontWeight: FontWeight.w700,
@@ -865,9 +858,7 @@ class _HospitalStatusCard extends StatelessWidget {
                   fontSize: 16,
                 ),
               ),
-              const Text(
-                'occupancy',
-                style: TextStyle(color: Colors.white30, fontSize: 9),
+              Text(context.opsTr('occupancy'), style: TextStyle(color: Colors.white30, fontSize: 9),
               ),
             ],
           ),

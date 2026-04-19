@@ -23,7 +23,7 @@ class OpsIntegrationRouting {
 
   static const defaults = OpsIntegrationRouting(
     victimVoiceTransport: VictimVoiceTransport.livekit,
-    mapsTiles: OpsMapsTiles.leaflet,
+    mapsTiles: OpsMapsTiles.google,
   );
 
   bool get useFirebasePttOnly =>

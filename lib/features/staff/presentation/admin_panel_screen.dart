@@ -1,10 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:emergency_os/core/constants/app_constants.dart';
+import 'package:emergency_os/core/constants/demo_credentials.dart';
 import 'package:emergency_os/core/constants/demo_gate_password.dart';
 import 'package:emergency_os/core/theme/app_colors.dart';
 import 'package:emergency_os/services/admin_panel_session_service.dart';
@@ -25,6 +27,7 @@ import 'master_insights_screen.dart';
 import 'master_systems_hub_screen.dart';
 import 'widgets/master_dashboard_health_bar.dart';
 import 'widgets/ops_dashboard_status_bar.dart';
+import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 class OpsDashboardScreen extends ConsumerStatefulWidget {
   const OpsDashboardScreen({super.key, this.focusIncidentId});
@@ -44,6 +47,7 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
   /// From `?comms=operation|emergency` + `?focus=<incidentId>`: switch to Comms and join.
   CommsPendingJoin? _commsPendingJoin;
   String? _appliedRouteCommsSig;
+  String? _appliedDockFocusSig;
 
   AdminConsoleRole _gateRole = AdminConsoleRole.master;
   final _emailCtrl = TextEditingController();
@@ -64,6 +68,13 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
   @override
   void initState() {
     super.initState();
+    // Pre-fill demo credentials for judge demo access.
+    const demoEmail = DemoCredentials.adminEmail;
+    const demoPw = DemoCredentials.adminPassword;
+    const demoHospitalId = DemoCredentials.hospitalId;
+    if (demoEmail.isNotEmpty) _emailCtrl.text = demoEmail;
+    if (demoPw.isNotEmpty) _passwordCtrl.text = demoPw;
+    if (demoHospitalId.isNotEmpty) _hospitalIdCtrl.text = demoHospitalId;
     _bootstrap();
   }
 
@@ -71,7 +82,7 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       final email = (user?.email ?? '').trim();
-      if (user == null || email.isEmpty) {
+      if (user == null || (email.isEmpty && !user.isAnonymous)) {
         await AdminPanelSessionService.clear();
         if (!context.mounted) return;
         setState(() {
@@ -82,6 +93,27 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
       }
       final a = await AdminPanelSessionService.load();
       if (!context.mounted) return;
+
+      if (a != null &&
+          a.role == AdminConsoleRole.medical &&
+          (a.boundHospitalDocId ?? '').trim().isNotEmpty) {
+        await _syncStaffHospitalToUserProfile(
+          uid: user.uid,
+          hospitalDocId: a.boundHospitalDocId!.trim(),
+        );
+      }
+
+      if (a != null) {
+        final expectedPath = OpsAdminRoutes.pathForRole(a.role);
+        final currentUri = GoRouterState.of(context).uri;
+        if (currentUri.path != expectedPath) {
+          final next = currentUri.hasQuery ? '$expectedPath?${currentUri.query}' : expectedPath;
+          context.go(next);
+          // Allow the new route to rebuild this screen
+          return;
+        }
+      }
+
       setState(() {
         _access = a;
         _loading = false;
@@ -102,6 +134,29 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
     _passwordCtrl.dispose();
     _hospitalIdCtrl.dispose();
     super.dispose();
+  }
+
+  /// Cloud Functions `acceptHospitalDispatch` / `declineHospitalDispatch` require
+  /// `users/{uid}.staffHospitalId` (or `boundHospitalDocId`) to match the facility.
+  /// Medical gate uses anonymous auth — merge the verified hospital id onto the profile.
+  Future<void> _syncStaffHospitalToUserProfile({
+    required String uid,
+    required String hospitalDocId,
+  }) async {
+    final hid = hospitalDocId.trim();
+    if (hid.isEmpty) return;
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(uid).set(
+        <String, dynamic>{
+          'staffHospitalId': hid,
+          'boundHospitalDocId': hid,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+    } catch (e, st) {
+      debugPrint('[admin_panel] staffHospitalId profile sync failed: $e $st');
+    }
   }
 
   int? _commsTabIndexForAccess(AdminPanelAccess a) {
@@ -131,6 +186,33 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
     }
   }
 
+  Widget _demoBanner(String message) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1F6FEB).withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFF58A6FF), width: 1),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline, color: Color(0xFF58A6FF), size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: Color(0xFF58A6FF),
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _gateTitleForPath() {
     try {
       final path = GoRouterState.of(context).uri.path;
@@ -151,6 +233,24 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
     if (access == null) return;
     final uri = GoRouterState.of(context).uri;
     final commsRaw = uri.queryParameters['comms']?.trim().toLowerCase() ?? '';
+    final dock = uri.queryParameters['dock']?.trim().toLowerCase() ?? '';
+    final focusForDock = uri.queryParameters['focus']?.trim() ?? '';
+    if (dock == 'live' || dock == 'command' || dock == '0') {
+      final sig = 'dock|$dock|$focusForDock';
+      if (_appliedDockFocusSig != sig) {
+        _appliedDockFocusSig = sig;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          setState(() => _selectedIndex = 0);
+          final path = OpsAdminRoutes.pathForRole(access.role);
+          final params = Map<String, String>.from(uri.queryParameters);
+          params.remove('dock');
+          final q = Uri(queryParameters: params).query;
+          context.go(q.isEmpty ? path : '$path?$q');
+        });
+      }
+    }
+
     if (commsRaw != 'operation' && commsRaw != 'emergency') {
       _appliedRouteCommsSig = null;
       return;
@@ -181,6 +281,7 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
     await FirebaseAuth.instance.signInAnonymously();
   }
 
+  // ignore: unused_element
   Future<String?> _promptMedicalHospitalCredentials() async {
     final hid = TextEditingController();
     final pw = TextEditingController();
@@ -188,9 +289,7 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.slate800,
-        title: const Text(
-          'Hospital login',
-          style: TextStyle(color: Colors.white),
+        title: Text(context.opsTr('Hospital login'), style: TextStyle(color: Colors.white),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -198,8 +297,8 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
             TextField(
               controller: hid,
               style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                labelText: 'Hospital document ID',
+              decoration: InputDecoration(
+                labelText: context.opsTr('Hospital document ID'),
                 labelStyle: TextStyle(color: Colors.white54),
               ),
             ),
@@ -208,8 +307,8 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
               controller: pw,
               obscureText: true,
               style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                labelText: 'Access password',
+              decoration: InputDecoration(
+                labelText: context.opsTr('Access password'),
                 labelStyle: TextStyle(color: Colors.white54),
               ),
             ),
@@ -218,7 +317,7 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: Text(context.opsTr('Cancel')),
           ),
           TextButton(
             onPressed: () async {
@@ -241,8 +340,8 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
               if (!ok) {
                 if (ctx.mounted) {
                   ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(
-                      content: Text('Unknown hospital or wrong password.'),
+                    SnackBar(
+                      content: Text(context.opsTr('Unknown hospital or wrong password.')),
                     ),
                   );
                 }
@@ -250,7 +349,7 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
               }
               if (ctx.mounted) Navigator.pop(ctx, id);
             },
-            child: const Text('OK'),
+            child: Text(context.opsTr('OK')),
           ),
         ],
       ),
@@ -309,8 +408,8 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
         if (hid.isEmpty || pw.isEmpty) {
           if (!context.mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Enter hospital ID and access password.'),
+            SnackBar(
+              content: Text(context.opsTr('Enter hospital ID and access password.')),
             ),
           );
           setState(() => _checkingCredentials = false);
@@ -350,13 +449,17 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
           role: AdminConsoleRole.medical,
           boundHospitalDocId: hid,
         );
+        final nUid = FirebaseAuth.instance.currentUser?.uid;
+        if (nUid != null) {
+          await _syncStaffHospitalToUserProfile(uid: nUid, hospitalDocId: hid);
+        }
       } else {
         final email = _emailCtrl.text.trim();
         final password = _passwordCtrl.text;
         if (email.isEmpty || password.isEmpty) {
           if (!context.mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Enter admin email and password.')),
+            SnackBar(content: Text(context.opsTr('Enter admin email and password.'))),
           );
           setState(() => _checkingCredentials = false);
           return;
@@ -423,6 +526,7 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
       _access = null;
       _lastSyncedGatePath = null;
       _loading = false;
+      _appliedDockFocusSig = null;
     });
     context.go(
       returnMedical == true
@@ -442,76 +546,76 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
     ];
     if (a.role == AdminConsoleRole.master) {
       list.add(
-        const NavigationRailDestination(
+        NavigationRailDestination(
           icon: Icon(Icons.admin_panel_settings_outlined),
-          label: Text('Management'),
+          label: Text(context.opsTr('Management')),
         ),
       );
       list.add(
-        const NavigationRailDestination(
+        NavigationRailDestination(
           icon: Icon(Icons.tune_rounded),
           selectedIcon: Icon(Icons.tune),
-          label: Text('Systems'),
+          label: Text(context.opsTr('Systems')),
         ),
       );
       if (a.canUseAnalytics) {
         list.add(
-          const NavigationRailDestination(
+          NavigationRailDestination(
             icon: Icon(Icons.analytics),
-            label: Text('Analytics'),
+            label: Text(context.opsTr('Analytics')),
           ),
         );
       }
       if (a.canUseCommsBridge) {
         list.add(
-          const NavigationRailDestination(
+          NavigationRailDestination(
             icon: Icon(Icons.headset_mic_outlined),
             selectedIcon: Icon(Icons.headset_mic),
-            label: Text('Comms'),
+            label: Text(context.opsTr('Comms')),
           ),
         );
       }
       list.add(
-        const NavigationRailDestination(
+        NavigationRailDestination(
           icon: Icon(Icons.insights_rounded),
-          label: Text('Insights'),
+          label: Text(context.opsTr('Insights')),
         ),
       );
     }
     if (a.role == AdminConsoleRole.medical) {
       list.add(
-        const NavigationRailDestination(
+        NavigationRailDestination(
           icon: Icon(Icons.crisis_alert),
-          label: Text('Live Operations'),
+          label: Text(context.opsTr('Live Operations')),
         ),
       );
       list.add(
-        const NavigationRailDestination(
+        NavigationRailDestination(
           icon: Icon(Icons.directions_car_filled),
-          label: Text('Fleet'),
+          label: Text(context.opsTr('Fleet')),
         ),
       );
       if (a.canUseCommsBridge) {
         list.add(
-          const NavigationRailDestination(
+          NavigationRailDestination(
             icon: Icon(Icons.headset_mic_outlined),
             selectedIcon: Icon(Icons.headset_mic),
-            label: Text('Comms'),
+            label: Text(context.opsTr('Comms')),
           ),
         );
       }
     }
     if (a.canUseAnalytics && a.role != AdminConsoleRole.master) {
       list.add(
-        const NavigationRailDestination(
+        NavigationRailDestination(
           icon: Icon(Icons.analytics),
-          label: Text('Analytics'),
+          label: Text(context.opsTr('Analytics')),
         ),
       );
       list.add(
-        const NavigationRailDestination(
+        NavigationRailDestination(
           icon: Icon(Icons.description_outlined),
-          label: Text('Reports'),
+          label: Text(context.opsTr('Reports')),
         ),
       );
     }
@@ -714,18 +818,14 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
                 color: AppColors.accentBlue,
               ),
               const SizedBox(height: 24),
-              const Text(
-                'Desktop Only',
-                style: TextStyle(
+              Text(context.opsTr('Desktop Only'), style: TextStyle(
                   color: Colors.white,
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 16),
-              const Text(
-                'The Admin Console requires a larger screen.',
-                style: TextStyle(color: Colors.white70),
+              Text(context.opsTr('The Admin Console requires a larger screen.'), style: TextStyle(color: Colors.white70),
               ),
             ],
           ),
@@ -807,9 +907,7 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
               ),
               if (_checkingCredentials) ...[
                 const SizedBox(height: 16),
-                const Text(
-                  'Verifying clearance level...',
-                  style: TextStyle(color: Colors.white54, fontSize: 16),
+                Text(context.opsTr('Verifying clearance level...'), style: TextStyle(color: Colors.white54, fontSize: 16),
                 ),
               ],
             ],
@@ -846,9 +944,23 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
+                  // Demo hint banner
+                  if (_gateRole == AdminConsoleRole.master &&
+                      DemoCredentials.adminEmail.isNotEmpty) ...[
+                    _demoBanner(
+                      '🎯 Demo: Email & password pre-filled. Select "Master" and tap Enter console.',
+                    ),
+                    const SizedBox(height: 12),
+                  ] else if (_gateRole == AdminConsoleRole.medical &&
+                      DemoCredentials.hospitalId.isNotEmpty) ...[
+                    _demoBanner(
+                      '🎯 Demo: Hospital ID & password pre-filled. Tap Enter console.',
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   InputDecorator(
                     decoration: InputDecoration(
-                      labelText: 'Role',
+                      labelText: context.opsTr('Role'),
                       labelStyle: const TextStyle(color: Colors.white54),
                       filled: true,
                       fillColor: AppColors.slate900,
@@ -865,19 +977,22 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
                           color: Colors.white,
                           fontSize: 15,
                         ),
-                        items: const [
+                        items: [
                           DropdownMenuItem(
                             value: AdminConsoleRole.master,
-                            child: Text('Master — full access'),
+                            child: Text(context.opsTr('Master — full access')),
                           ),
                           DropdownMenuItem(
                             value: AdminConsoleRole.medical,
-                            child: Text('Medical — EMS + hospital'),
+                            child: Text(context.opsTr('Medical — EMS + hospital')),
                           ),
                         ],
                         onChanged: (v) {
                           if (v == null) return;
                           setState(() => _gateRole = v);
+                          // Re-sync demo password for the newly selected role.
+                          const demoPw = DemoCredentials.adminPassword;
+                          if (demoPw.isNotEmpty) _passwordCtrl.text = demoPw;
                         },
                       ),
                     ),
@@ -889,8 +1004,8 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
                       autocorrect: false,
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
-                        labelText: 'Hospital ID',
-                        hintText: 'HOSPITAL-DOC-ID',
+                        labelText: context.opsTr('Hospital ID'),
+                        hintText: context.opsTr('HOSPITAL-DOC-ID'),
                         labelStyle: const TextStyle(color: Colors.white54),
                         filled: true,
                         fillColor: AppColors.slate900,
@@ -906,7 +1021,7 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
                       autocorrect: false,
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
-                        labelText: 'Admin email',
+                        labelText: context.opsTr('Admin email'),
                         labelStyle: const TextStyle(color: Colors.white54),
                         filled: true,
                         fillColor: AppColors.slate900,
@@ -951,7 +1066,7 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
                               color: Colors.white,
                             ),
                           )
-                        : const Text('Enter console'),
+                        : Text(context.opsTr('Enter console')),
                   ),
                 ],
               ),
@@ -1026,9 +1141,7 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
                   ),
                   onPressed: _signOutConsole,
                   icon: const Icon(Icons.logout_rounded, size: 20),
-                  label: const Text(
-                    'Log out',
-                    style: TextStyle(fontWeight: FontWeight.w700),
+                  label: Text(context.opsTr('Log out'), style: TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
               ],

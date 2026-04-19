@@ -1,15 +1,19 @@
 import 'dart:async';
-import 'dart:ui' show FontFeature;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+
+import '../../../../core/l10n/app_localizations.dart';
+import '../../../../core/providers/locale_provider.dart';
+import '../../../../services/voice_comms_service.dart';
 
 /// Windows-style tray strip: language, connectivity, mic, volume, uptime, clock.
 ///
 /// When [dockTray] is true, renders only the compact tray row (no full-width bar
 /// chrome) for placement on the right inside the ops taskbar dock.
-class OpsDashboardStatusBar extends StatefulWidget {
+class OpsDashboardStatusBar extends ConsumerStatefulWidget {
   const OpsDashboardStatusBar({
     super.key,
     required this.sessionStartedAt,
@@ -20,10 +24,10 @@ class OpsDashboardStatusBar extends StatefulWidget {
   final bool dockTray;
 
   @override
-  State<OpsDashboardStatusBar> createState() => _OpsDashboardStatusBarState();
+  ConsumerState<OpsDashboardStatusBar> createState() => _OpsDashboardStatusBarState();
 }
 
-class _OpsDashboardStatusBarState extends State<OpsDashboardStatusBar> {
+class _OpsDashboardStatusBarState extends ConsumerState<OpsDashboardStatusBar> {
   Timer? _ticker;
   DateTime _now = DateTime.now();
   List<ConnectivityResult> _connectivity = const [ConnectivityResult.none];
@@ -86,36 +90,63 @@ class _OpsDashboardStatusBarState extends State<OpsDashboardStatusBar> {
 
   @override
   Widget build(BuildContext context) {
-    final locale = View.of(context).platformDispatcher.locale;
-    final lang = locale.languageCode.toUpperCase();
-    final region = (locale.countryCode ?? '').toUpperCase();
+    final l10n = AppLocalizations.of(context);
+    final appLocale = ref.watch(localeProvider);
+    final localeTag = appLocale.countryCode != null && appLocale.countryCode!.isNotEmpty
+        ? '${appLocale.languageCode}_${appLocale.countryCode}'
+        : appLocale.languageCode;
+    final timeFmt = DateFormat.Hm(localeTag);
+    final dateFmt = DateFormat.yMd(localeTag);
     final uptime = _now.difference(widget.sessionStartedAt);
+    final uptimeLabel =
+        l10n.get('ops_tray_uptime').replaceAll('{time}', _formatUptime(uptime));
 
     final tray = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Text(
-              lang,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 9,
-                fontWeight: FontWeight.w700,
-                height: 1,
+        PopupMenuButton<Locale>(
+          tooltip: l10n.get('language_picker_title'),
+          padding: EdgeInsets.zero,
+          onSelected: (loc) async {
+            await ref.read(localeProvider.notifier).setLocale(loc);
+            VoiceCommsService.clearSpeakQueue();
+          },
+          itemBuilder: (context) => [
+            for (final loc in kSupportedLocales)
+              PopupMenuItem<Locale>(
+                value: loc,
+                child: Text(kLocaleLabels[loc.languageCode] ?? loc.languageCode),
               ),
-            ),
-            Text(
-              region.isEmpty ? '—' : region,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 8,
-                height: 1,
-              ),
-            ),
           ],
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                appLocale.languageCode.toUpperCase(),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  height: 1,
+                ),
+              ),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 56),
+                child: Text(
+                  kLocaleLabels[appLocale.languageCode] ?? appLocale.languageCode,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 7,
+                    height: 1,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
         const SizedBox(width: 14),
         Icon(_networkIcon(), color: Colors.white70, size: 18),
@@ -129,7 +160,7 @@ class _OpsDashboardStatusBarState extends State<OpsDashboardStatusBar> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              DateFormat('HH:mm').format(_now),
+              timeFmt.format(_now),
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 12,
@@ -139,7 +170,7 @@ class _OpsDashboardStatusBarState extends State<OpsDashboardStatusBar> {
               ),
             ),
             Text(
-              DateFormat('dd-MM-yyyy').format(_now),
+              dateFmt.format(_now),
               style: const TextStyle(
                 color: Colors.white70,
                 fontSize: 10,
@@ -151,7 +182,7 @@ class _OpsDashboardStatusBarState extends State<OpsDashboardStatusBar> {
         ),
         const SizedBox(width: 16),
         Text(
-          'Uptime ${_formatUptime(uptime)}',
+          uptimeLabel,
           style: const TextStyle(
             color: Colors.white54,
             fontSize: 11,

@@ -1,3 +1,7 @@
+// Volunteer consignment screen keeps weather/preview scaffolding and helper
+// widgets reserved for upcoming situation-brief integrations.
+// ignore_for_file: unused_field, unused_element, unused_local_variable
+
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:convert';
@@ -15,7 +19,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/widgets/shared_situation_brief_card.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/google_maps_illustrative_light_style.dart';
@@ -29,7 +32,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../sos/domain/emergency_voice_interview_questions.dart';
 import '../../ai_assist/domain/protocol_engine.dart';
 import '../../ai_assist/presentation/ai_assist_screen.dart';
-import '../../ai_assist/presentation/widgets/lifeline_training_arena.dart';
 import '../../../services/incident_report_service.dart';
 import '../../../services/incident_service.dart';
 import '../../../services/ops_incident_hospital_assignment_service.dart';
@@ -39,11 +41,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../../../core/providers/drill_session_provider.dart';
 import '../../../core/providers/high_contrast_ops_provider.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 import '../../../services/dispatch_chain_service.dart';
 import '../../../services/voice_comms_service.dart';
 import '../../../features/map/domain/emergency_zone_classification.dart';
 import '../../../core/l10n/app_localizations.dart';
+import '../../../core/providers/locale_provider.dart';
+import '../../../core/widgets/language_switcher_button.dart';
 
 /// One line in the volunteer drill “live triage log”.
 class VolunteerDrillLogLine {
@@ -189,6 +192,7 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
   DispatchChainState? _dispatchChainState;
   String? _lastVolVoiceHospital;
   String? _lastVolVoicePhase;
+  String? _lastEmsVoicePhase;
 
   // True GeoJSON Road Paths
   List<LatLng> _hospRoute = [];
@@ -303,6 +307,7 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
             }
           });
         }
+        _maybeEmsWorkflowVoice(d);
 
         final stillOpen = ['pending', 'dispatched', 'blocked'].contains(st);
         final inAccepted = accepted.contains(uid);
@@ -353,6 +358,43 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
           });
         }
       });
+    }
+  }
+
+  void _maybeEmsWorkflowVoice(Map<String, dynamic> d) {
+    if (widget.isVictim) return;
+    final phase = (d['emsWorkflowPhase'] as String?)?.trim() ?? '';
+    if (phase.isEmpty) return;
+    if (phase == _lastEmsVoicePhase) return;
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
+    if (phase == 'on_scene') {
+      _lastEmsVoicePhase = 'on_scene';
+      VoiceCommsService.readAloud(l10n.get('voice_ambulance_on_scene_volunteer'));
+    } else if (phase == 'returning') {
+      _lastEmsVoicePhase = 'returning';
+      VoiceCommsService.readAloud(l10n.get('voice_ambulance_returning'));
+    } else if (phase == 'complete') {
+      _lastEmsVoicePhase = 'complete';
+      DateTime? t0;
+      final ts = d['timestamp'];
+      if (ts is Timestamp) t0 = ts.toDate();
+      DateTime? tend;
+      final te = d['emsResponseCompleteAt'];
+      if (te is Timestamp) tend = te.toDate();
+      if (t0 != null && tend != null) {
+        final total = tend.difference(t0);
+        final m = total.inMinutes;
+        final s = total.inSeconds % 60;
+        VoiceCommsService.readAloud(
+          l10n
+              .get('voice_response_complete_cycle')
+              .replaceAll('{minutes}', '$m')
+              .replaceAll('{seconds}', '$s'),
+        );
+      } else {
+        VoiceCommsService.readAloud(l10n.get('voice_response_complete_station'));
+      }
     }
   }
 
@@ -1731,6 +1773,11 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<Locale>(localeProvider, (prev, next) {
+      if (prev?.languageCode == next.languageCode) return;
+      VoiceCommsService.clearSpeakQueue();
+    });
+
     if (_isLoading) {
       return const Scaffold(
         backgroundColor: AppColors.background,
@@ -1754,6 +1801,32 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
         backgroundColor: AppColors.background,
         body: Column(
           children: [
+          ValueListenableBuilder<String?>(
+            valueListenable: VoiceCommsService.ttsStatusNotifier,
+            builder: (context, msg, _) {
+              if (msg == null || msg.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+                child: Material(
+                  elevation: 4,
+                  borderRadius: BorderRadius.circular(10),
+                  color: Colors.deepOrange.shade900.withValues(alpha: 0.94),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Text(
+                      msg,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
           // ── Tab bar ──────────────────────────────────────────────────────
           SafeArea(
             bottom: false,
@@ -1776,14 +1849,15 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
                       ],
                     ),
                   ),
+                  const LanguageSwitcherButton(),
                   if (!widget.isVictim)
                     IconButton(
-                      tooltip: 'Lifeline — first-aid guides (stays on response)',
+                      tooltip: AppLocalizations.of(context).get('vol_tooltip_lifeline_first_aid'),
                       onPressed: _openLifelineFirstAid,
                       icon: const Icon(Icons.medical_services_rounded, color: AppColors.primaryInfo),
                     ),
                   IconButton(
-                    tooltip: 'Exit Mission',
+                    tooltip: AppLocalizations.of(context).get('vol_tooltip_exit_mission'),
                     onPressed: () async {
                       final ok = await _confirmExitDialog();
                       if (ok && context.mounted) await _leaveActiveConsignment();
@@ -1814,14 +1888,20 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
                       Expanded(
                         child: Text(
                           _lowPowerConsignment
-                              ? 'Low-power tracking: we sync your position less often and only after larger moves. Dispatch still sees your last point.'
-                              : 'Your live location is shared with this incident while you are on consignment so the map and ETAs stay accurate.',
+                              ? AppLocalizations.of(context)
+                                  .get('vol_low_power_tracking_hint')
+                              : AppLocalizations.of(context)
+                                  .get('volunteer_consignment_live_location_hint'),
                           style: const TextStyle(color: Colors.white70, fontSize: 11, height: 1.35),
                         ),
                       ),
                       TextButton(
                         onPressed: _toggleLowPowerConsignment,
-                        child: Text(_lowPowerConsignment ? 'Normal GPS' : 'Low power'),
+                        child: Text(_lowPowerConsignment
+                            ? AppLocalizations.of(context)
+                                .get('volunteer_consignment_normal_gps_label')
+                            : AppLocalizations.of(context)
+                                .get('volunteer_consignment_low_power_label')),
                       ),
                     ],
                   ),
@@ -1841,6 +1921,7 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
                 Stack(
                   children: [
                     EosHybridMap(
+                      ignoreRemoteLeafletTiles: false,
                       mapId: AppConstants.googleMapsDarkMapId.isNotEmpty ? AppConstants.googleMapsDarkMapId : null,
                       style: effectiveGoogleMapsEmbeddedStyleJson(),
                       mapType: lowPowerMap ? MapType.normal : MapType.hybrid,
@@ -1906,7 +1987,10 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
                             rotation: suppressMotion ? 0.0 : _userCourseDeg,
                             flat: true,
                             anchor: const Offset(0.5, 0.5),
-                            infoWindow: const InfoWindow(title: 'You', snippet: 'Active Unit'),
+                            infoWindow: InfoWindow(
+                              title: AppLocalizations.of(context).get('vol_marker_you'),
+                              snippet: AppLocalizations.of(context).get('vol_marker_active_unit'),
+                            ),
                           ),
                         Marker(
                           markerId: const MarkerId('incident'),
@@ -1915,10 +1999,12 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
                           icon: _incidentIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
                           rotation: suppressMotion ? 0.0 : _rotationController.value * -360,
                           infoWindow: InfoWindow(
-                            title: widget.isDrillMode ? 'Practice incident' : 'Accident Scene',
+                            title: widget.isDrillMode
+                                ? AppLocalizations.of(context).get('vol_marker_practice_incident')
+                                : AppLocalizations.of(context).get('vol_marker_accident_scene'),
                             snippet: widget.isDrillMode
-                                ? 'Training pin — not a real SOS'
-                                : 'GITM COLLEGE - High Severity',
+                                ? AppLocalizations.of(context).get('vol_marker_training_pin')
+                                : AppLocalizations.of(context).get('vol_marker_high_severity'),
                           ),
                         ),
                         if (_dispatchChainState?.notifiedHospitalPosition != null || _dispatchChainState?.acceptedHospitalPosition != null)
@@ -1930,8 +2016,12 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
                                 _incidentLocation,
                             infoWindow: InfoWindow(
                               title: _dispatchChainState?.isAccepted == true
-                                  ? 'Accepted: ${_dispatchChainState?.currentHospitalName ?? ''}'
-                                  : 'Trying: ${_dispatchChainState?.currentHospitalName ?? ''}',
+                                  ? AppLocalizations.of(context)
+                                      .get('vol_marker_accepted_hospital')
+                                      .replaceAll('{hospital}', _dispatchChainState?.currentHospitalName ?? '')
+                                  : AppLocalizations.of(context)
+                                      .get('vol_marker_trying_hospital')
+                                      .replaceAll('{hospital}', _dispatchChainState?.currentHospitalName ?? ''),
                             ),
                             icon: BitmapDescriptor.defaultMarkerWithHue(
                               _dispatchChainState?.isAccepted == true
@@ -1950,7 +2040,11 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
                           rotation: suppressMotion ? 0.0 : _ambulanceBearing,
                           flat: true,
                           anchor: const Offset(0.5, 0.5),
-                          infoWindow: InfoWindow(title: _trackingController.value >= 0.98 ? 'AMBULANCE ON SCENE!' : 'Ambulance En Route'),
+                          infoWindow: InfoWindow(
+                            title: _trackingController.value >= 0.98
+                                ? AppLocalizations.of(context).get('vol_marker_ambulance_on_scene')
+                                : AppLocalizations.of(context).get('vol_marker_ambulance_en_route'),
+                          ),
                         ),
                       },
                     ),
@@ -2025,8 +2119,10 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
                                   const SizedBox(height: 6),
                                   Text(
                                     _arrivedAtPin
-                                        ? 'AT SCENE PIN'
-                                        : (_isOnScene ? 'IN 5 KM ZONE' : 'EN ROUTE'),
+                                        ? AppLocalizations.of(context).get('vol_badge_at_scene_pin')
+                                        : (_isOnScene
+                                            ? AppLocalizations.of(context).get('vol_badge_in_5km_zone')
+                                            : AppLocalizations.of(context).get('vol_badge_en_route')),
                                     style: TextStyle(
                                       color: _arrivedAtPin
                                           ? AppColors.primarySafe
@@ -2509,6 +2605,31 @@ class _OnSceneEtaCard extends StatelessWidget {
         final amb = (data?['ambulanceEta'] as String?)?.trim() ?? '—';
         final med = (data?['medicalStatus'] as String?)?.trim() ?? '—';
         final sim = simulatedAmbulanceMinutes;
+        final emsPhase = (data?['emsWorkflowPhase'] as String?)?.trim() ?? '';
+        String? emsBanner;
+        if (emsPhase == 'inbound') {
+          emsBanner = l10n.get('vol_ems_banner_en_route');
+        } else if (emsPhase == 'on_scene') {
+          emsBanner = l10n.get('vol_ems_banner_on_scene');
+        } else if (emsPhase == 'returning') {
+          emsBanner = l10n.get('vol_ems_banner_returning');
+        } else if (emsPhase == 'complete') {
+          DateTime? t0;
+          final ts = data?['timestamp'];
+          if (ts is Timestamp) t0 = ts.toDate();
+          DateTime? tend;
+          final te = data?['emsResponseCompleteAt'];
+          if (te is Timestamp) tend = te.toDate();
+          if (t0 != null && tend != null) {
+            final total = tend.difference(t0);
+            emsBanner = l10n
+                .get('vol_ems_banner_complete_with_cycle')
+                .replaceAll('{m}', '${total.inMinutes}')
+                .replaceAll('{s}', '${total.inSeconds % 60}');
+          } else {
+            emsBanner = l10n.get('vol_ems_banner_complete');
+          }
+        }
         return Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -2526,6 +2647,27 @@ class _OnSceneEtaCard extends StatelessWidget {
                 l10n.volunteerActiveHospitalEvSubtitle,
                 style: const TextStyle(color: Colors.white54, fontSize: 11, height: 1.3),
               ),
+              if (emsBanner != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.cyanAccent.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.35)),
+                  ),
+                  child: Text(
+                    emsBanner,
+                    style: const TextStyle(
+                      color: Colors.cyanAccent,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               if (routedHospitalHint.isNotEmpty)
                 _etaRow(Icons.local_hospital_rounded, 'EMS corridor (map area)', routedHospitalHint, Colors.cyanAccent),
@@ -2689,8 +2831,12 @@ class _OnSceneVolunteerPanelState extends State<_OnSceneVolunteerPanel> {
         return;
       }
       final bytes = await picked.readAsBytes();
+      final incidentId =
+          widget.incidentId.trim().isEmpty ? 'unassigned' : widget.incidentId.trim();
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}_$uid.jpg';
       final ref = FirebaseStorage.instance
-          .ref('incident_photos//.jpg');
+          .ref('incident_photos/$incidentId/$fileName');
       await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
       final url = await ref.getDownloadURL();
       if (mounted) {
