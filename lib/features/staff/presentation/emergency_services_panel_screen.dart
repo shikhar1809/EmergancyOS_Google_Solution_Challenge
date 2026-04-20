@@ -2626,50 +2626,49 @@ class _DriverMapPanel extends StatelessWidget {
   final ValueChanged<double> onFleetCameraMove;
   final void Function(OpsMapController) onMapCreated;
   final Widget? mapBottomOverlay;
-  /// Rendered above the sliders (top-right corner of the map) for things like
-  /// the Driver SOS button and post-raise emergency banner.
   final Widget? mapTopOverlay;
 
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
-      child: Stack(
-        fit: StackFit.expand,
+      child: Column(
         children: [
-          EosHybridMap(
-            cameraTargetBounds: IndiaOpsZones.lucknowCameraTargetBounds,
-            initialCameraPosition: IndiaOpsZones.lucknowSafeCamera(layers.victim, preferZoom: 14),
-            onCameraMove: (CameraPosition p) => onFleetCameraMove(p.zoom),
-            markers: layers.markers,
-            polylines: layers.polylines,
-            mapType: MapType.normal,
-            mapId: AppConstants.googleMapsDarkMapId.isNotEmpty ? AppConstants.googleMapsDarkMapId : null,
-            style: effectiveGoogleMapsEmbeddedStyleJson(),
-            myLocationEnabled: true,
-            myLocationButtonEnabled: true,
-            zoomControlsEnabled: false,
-            onMapCreated: onMapCreated,
-          ),
-          if (mapTopOverlay != null)
-            Positioned(
-              left: 8,
-              right: 8,
-              top: 8,
-              child: SafeArea(
-                bottom: false,
-                child: mapTopOverlay!,
-              ),
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                EosHybridMap(
+                  cameraTargetBounds: IndiaOpsZones.lucknowCameraTargetBounds,
+                  initialCameraPosition: IndiaOpsZones.lucknowSafeCamera(layers.victim, preferZoom: 14),
+                  onCameraMove: (CameraPosition p) => onFleetCameraMove(p.zoom),
+                  markers: layers.markers,
+                  polylines: layers.polylines,
+                  mapType: MapType.normal,
+                  mapId: AppConstants.googleMapsDarkMapId.isNotEmpty ? AppConstants.googleMapsDarkMapId : null,
+                  style: effectiveGoogleMapsEmbeddedStyleJson(),
+                  myLocationEnabled: true,
+                  myLocationButtonEnabled: true,
+                  zoomControlsEnabled: false,
+                  onMapCreated: onMapCreated,
+                ),
+                if (mapTopOverlay != null)
+                  Positioned(
+                    left: 8,
+                    right: 8,
+                    top: 8,
+                    child: SafeArea(
+                      bottom: false,
+                      child: mapTopOverlay!,
+                    ),
+                  ),
+              ],
             ),
+          ),
           if (mapBottomOverlay != null)
-            Positioned(
-              left: 8,
-              right: 8,
-              bottom: 8,
-              child: SafeArea(
-                top: false,
-                child: mapBottomOverlay!,
-              ),
+            Padding(
+              padding: const EdgeInsets.only(top: 12, left: 8, right: 8, bottom: 8),
+              child: mapBottomOverlay!,
             ),
         ],
       ),

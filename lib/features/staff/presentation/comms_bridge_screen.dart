@@ -637,10 +637,15 @@ class _CommsBridgeScreenState extends State<CommsBridgeScreen> {
 
     final hid = _selectedServerKey as String;
     final forHospital = incidents.where((e) {
+      // Only show truly live incidents — exclude resolved/archived/completed.
       if (e.status == IncidentStatus.resolved) return false;
+      // Must have a matching accepted assignment for this hospital.
       final p = assignmentPrimaryByIncident[e.id]?.trim();
       if (p == null || p.isEmpty) return false;
-      return p == hid;
+      if (p != hid) return false;
+      // Must have a non-empty type (no phantom "Unknown" channels).
+      if (e.type.trim().isEmpty) return false;
+      return true;
     }).toList()..sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
     return Container(
@@ -1290,9 +1295,12 @@ class _CommsBridgeScreenState extends State<CommsBridgeScreen> {
                   },
                 ),
                 StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  // Only pull accepted assignments — prevents phantom channels
+                  // from pending/declined/expired rows poisoning the channel list.
                   stream: FirebaseFirestore.instance
                       .collection('ops_incident_hospital_assignments')
-                      .limit(400)
+                      .where('dispatchStatus', isEqualTo: 'accepted')
+                      .limit(200)
                       .snapshots(),
                   builder: (context, aSnap) {
                     final primaries = <String, String>{};
@@ -1302,9 +1310,11 @@ class _CommsBridgeScreenState extends State<CommsBridgeScreen> {
                       if (pid != null && pid.isNotEmpty) primaries[d.id] = pid;
                     }
                     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                      // Only live incidents — filter resolved/archived client-side.
                       stream: FirebaseFirestore.instance
                           .collection('sos_incidents')
-                          .limit(400)
+                          .where('status', whereIn: ['active', 'dispatched', 'en_route', 'on_scene', 'returning'])
+                          .limit(200)
                           .snapshots(),
                       builder: (context, iSnap) {
                         final incidents =
@@ -1312,8 +1322,13 @@ class _CommsBridgeScreenState extends State<CommsBridgeScreen> {
                                 .map(SosIncident.fromFirestore)
                                 .where((e) {
                                   final id = e.id;
-                                  return !id.startsWith('demo_') &&
-                                      !id.startsWith('demo_ops_');
+                                  // Drop demo docs and any incident with no type
+                                  // (these are phantom/orphan records that show as
+                                  // "Unknown" in the channel list).
+                                  if (id.startsWith('demo_') ||
+                                      id.startsWith('demo_ops_')) return false;
+                                  if (e.type.trim().isEmpty) return false;
+                                  return true;
                                 })
                                 .toList() ??
                             [];

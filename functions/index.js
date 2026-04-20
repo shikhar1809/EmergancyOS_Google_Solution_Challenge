@@ -1909,7 +1909,7 @@ function sanitizeUserField(value, maxLen) {
   return s.slice(0, maxLen || 500);
 }
 
-function computeSituationBriefFingerprint(inc) {
+function computeSituationBriefFingerprint(inc, fleetHandoffNotes) {
   const scene = inc && typeof inc.volunteerSceneReport === "object" && inc.volunteerSceneReport !== null
     ? inc.volunteerSceneReport
     : {};
@@ -1925,12 +1925,13 @@ function computeSituationBriefFingerprint(inc) {
     med: String(inc.medicalStatus || ""),
     eta: String(inc.ambulanceEta || ""),
     ems: String(inc.emsWorkflowPhase || ""),
+    fleetNotes: String(fleetHandoffNotes || ""),
   });
   return crypto.createHash("sha256").update(payload).digest("hex");
 }
 
-function shouldRegenerateSituationBrief(inc, existingBrief, force) {
-  const fp = computeSituationBriefFingerprint(inc);
+function shouldRegenerateSituationBrief(inc, existingBrief, force, fleetHandoffNotes) {
+  const fp = computeSituationBriefFingerprint(inc, fleetHandoffNotes);
   const lastGen = timestampToMillis(existingBrief?.lastGeneratedAt);
   const now = Date.now();
   const prevFp = typeof existingBrief?.sourceFingerprint === "string" ? existingBrief.sourceFingerprint : "";
@@ -1947,7 +1948,7 @@ function shouldRegenerateSituationBrief(inc, existingBrief, force) {
   return { ok: false, reason: "fresh_unchanged", fp };
 }
 
-function buildSituationBriefDigest(incidentId, inc) {
+function buildSituationBriefDigest(incidentId, inc, fleetHandoffNotes) {
   const lines = [];
   lines.push(`INCIDENT_ID=${incidentId}`);
   lines.push(`TYPE=${inc.type || ""}`);
@@ -1987,6 +1988,10 @@ function buildSituationBriefDigest(incidentId, inc) {
   if (inc.videoAssessment && typeof inc.videoAssessment === "object") {
     lines.push(`VIDEO_ASSESSMENT_JSON=${JSON.stringify(inc.videoAssessment).slice(0, 8000)}`);
   }
+  // Fleet operator EMR handoff notes (submitted by ambulance crew on handover to hospital).
+  if (fleetHandoffNotes && fleetHandoffNotes.trim()) {
+    lines.push(`FLEET_OPERATOR_HANDOFF_NOTES=${sanitizeUserField(fleetHandoffNotes, 6000)}`);
+  }
   return lines.join("\n");
 }
 
@@ -2020,7 +2025,22 @@ async function generateSituationBriefCore(incidentId, { force } = {}) {
     ? inc.sharedSituationBrief
     : {};
 
-  const decision = shouldRegenerateSituationBrief(inc, existingBrief, !!force);
+  // Fetch fleet operator handoff notes (EMR crew clinical notes for hospital handover).
+  let fleetHandoffNotes = "";
+  try {
+    const handoffSnap = await ref.collection("fleet_operator_handoff").limit(8).get();
+    const notesParts = [];
+    for (const hdoc of handoffSnap.docs) {
+      const hdata = hdoc.data() || {};
+      const txt = typeof hdata.notesText === "string" ? hdata.notesText.trim() : "";
+      if (txt) notesParts.push(txt);
+    }
+    fleetHandoffNotes = notesParts.join("\n---\n");
+  } catch (e) {
+    console.warn("[generateSituationBriefCore] fleet_operator_handoff fetch failed:", e?.message || e);
+  }
+
+  const decision = shouldRegenerateSituationBrief(inc, existingBrief, !!force, fleetHandoffNotes);
   if (!decision.ok) {
     return { ok: true, skipped: true, reason: decision.reason };
   }
@@ -2045,7 +2065,7 @@ async function generateSituationBriefCore(incidentId, { force } = {}) {
   };
   await ref.set({ sharedSituationBrief: nextBrief }, { merge: true });
 
-  const digest = buildSituationBriefDigest(incidentId, inc);
+  const digest = buildSituationBriefDigest(incidentId, inc, fleetHandoffNotes);
   const scene = inc.volunteerSceneReport && typeof inc.volunteerSceneReport === "object" ? inc.volunteerSceneReport : {};
   const photoPaths = Array.isArray(scene.photoPaths) ? scene.photoPaths : [];
   const imageParts = await fetchSituationBriefImageParts(photoPaths, 4, 900 * 1024);
@@ -2054,6 +2074,7 @@ async function generateSituationBriefCore(incidentId, { force } = {}) {
   const modalityHint = [];
   if (imageParts.length > 0) modalityHint.push(`${imageParts.length} scene photo(s) inline`);
   if (digest.includes("VOICE_NOTE_TRANSCRIPT=")) modalityHint.push("voice-note transcript in EVIDENCE");
+  if (fleetHandoffNotes) modalityHint.push("fleet operator EMR handoff notes in EVIDENCE");
   const modalityLine = modalityHint.length > 0
     ? `You are receiving MULTIMODAL INPUT: ${modalityHint.join(" + ")} alongside incident metadata.\n`
     : "";
@@ -2080,7 +2101,7 @@ async function generateSituationBriefCore(incidentId, { force } = {}) {
         type: "array",
         items: {
           type: "string",
-          enum: ["sceneReport", "photos", "voiceNote", "videoAssessment", "incidentMeta"],
+          enum: ["sceneReport", "photos", "voiceNote", "videoAssessment", "incidentMeta", "fleetHandoff"],
         },
       },
     },

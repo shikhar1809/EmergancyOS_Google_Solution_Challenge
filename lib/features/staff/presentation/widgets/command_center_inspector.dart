@@ -933,7 +933,17 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                   },
                 ),
                 _statusLine('Type of emergency', inc.type),
+                _statusLine('Report Accepted', inc.emsAcceptedAt != null
+                    ? DateFormat('MMM d, HH:mm').format(inc.emsAcceptedAt!.toLocal())
+                    : 'Pending'),
                 _statusLine('Victim conscious', _victimConsciousLabel(inc)),
+                _statusLine('Location', inc.location.latitude.toStringAsFixed(5) + ', ' + inc.location.longitude.toStringAsFixed(5)),
+                if (inc.bloodType != null && inc.bloodType!.isNotEmpty)
+                  _statusLine('Blood Type', inc.bloodType!, isHighlighted: true),
+                if (inc.allergies != null && inc.allergies!.isNotEmpty)
+                  _statusLine('Allergies', inc.allergies!),
+                if (inc.medicalConditions != null && inc.medicalConditions!.isNotEmpty)
+                  _statusLine('Medical Conditions', inc.medicalConditions!),
                 if ((inc.emsWorkflowPhase ?? '').trim() == 'on_scene' &&
                     inc.emsOnSceneAt != null)
                   _OnSceneHoldCountdownLine(onSceneAt: inc.emsOnSceneAt!),
@@ -942,6 +952,8 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                     'Return distance',
                     _returnDistanceLabel(inc),
                   ),
+                if (inc.emsHospitalArrivalAt != null)
+                  _statusLine('Hospital Arrival', DateFormat('MMM d, HH:mm').format(inc.emsHospitalArrivalAt!.toLocal())),
               ],
             ),
           ),
@@ -1495,7 +1507,8 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
     );
   }
 
-  Widget _statusLine(String label, String value) {
+  Widget _statusLine(String label, String value, {bool isHighlighted = false}) {
+    final textColor = isHighlighted ? Colors.amber : Colors.white;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
@@ -1504,7 +1517,7 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
             flex: 2,
             child: Text(
               label,
-              style: const TextStyle(color: Colors.white54, fontSize: 11),
+              style: TextStyle(color: isHighlighted ? Colors.amber : Colors.white54, fontSize: 11, fontWeight: isHighlighted ? FontWeight.w700 : FontWeight.w500),
             ),
           ),
           Expanded(
@@ -1512,7 +1525,7 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
             child: Text(
               value,
               textAlign: TextAlign.right,
-              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+              style: TextStyle(color: textColor, fontSize: 11, fontWeight: isHighlighted ? FontWeight.w700 : FontWeight.w600),
             ),
           ),
         ],

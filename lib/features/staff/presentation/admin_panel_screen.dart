@@ -52,6 +52,7 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
   AdminConsoleRole _gateRole = AdminConsoleRole.master;
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
+  final _hospitalPasswordCtrl = TextEditingController();
   final _hospitalIdCtrl = TextEditingController();
 
   bool _checkingCredentials = false;
@@ -72,9 +73,11 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
     const demoEmail = DemoCredentials.adminEmail;
     const demoPw = DemoCredentials.adminPassword;
     const demoHospitalId = DemoCredentials.hospitalId;
+    const demoGatePw = DemoGatePassword.value;
     if (demoEmail.isNotEmpty) _emailCtrl.text = demoEmail;
     if (demoPw.isNotEmpty) _passwordCtrl.text = demoPw;
     if (demoHospitalId.isNotEmpty) _hospitalIdCtrl.text = demoHospitalId;
+    if (demoGatePw.isNotEmpty) _hospitalPasswordCtrl.text = demoGatePw;
     _bootstrap();
   }
 
@@ -132,6 +135,7 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
   void dispose() {
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
+    _hospitalPasswordCtrl.dispose();
     _hospitalIdCtrl.dispose();
     super.dispose();
   }
@@ -404,7 +408,7 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
 
       if (_gateRole == AdminConsoleRole.medical) {
         final hid = _hospitalIdCtrl.text.trim().toUpperCase();
-        final pw = _passwordCtrl.text.trim();
+        final pw = _hospitalPasswordCtrl.text.trim();
         if (hid.isEmpty || pw.isEmpty) {
           if (!context.mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -998,7 +1002,12 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
                           setState(() => _gateRole = v);
                           // Re-sync demo password for the newly selected role.
                           const demoPw = DemoCredentials.adminPassword;
-                          if (demoPw.isNotEmpty) _passwordCtrl.text = demoPw;
+                          const demoGatePw = DemoGatePassword.value;
+                          if (v == AdminConsoleRole.medical) {
+                            if (demoGatePw.isNotEmpty) _hospitalPasswordCtrl.text = demoGatePw;
+                          } else {
+                            if (demoPw.isNotEmpty) _passwordCtrl.text = demoPw;
+                          }
                         },
                       ),
                     ),
@@ -1038,22 +1047,37 @@ class _OpsDashboardScreenState extends ConsumerState<OpsDashboardScreen> {
                     ),
                   ],
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: _passwordCtrl,
-                    obscureText: true,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: _gateRole == AdminConsoleRole.medical
-                          ? 'Hospital access password'
-                          : 'Password',
-                      labelStyle: const TextStyle(color: Colors.white54),
-                      filled: true,
-                      fillColor: AppColors.slate900,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
+                  if (_gateRole == AdminConsoleRole.medical) ...[
+                    TextField(
+                      controller: _hospitalPasswordCtrl,
+                      obscureText: true,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        labelText: 'Hospital gate password',
+                        labelStyle: const TextStyle(color: Colors.white54),
+                        filled: true,
+                        fillColor: AppColors.slate900,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
                     ),
-                  ),
+                  ] else ...[
+                    TextField(
+                      controller: _passwordCtrl,
+                      obscureText: true,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        labelText: 'Password',
+                        labelStyle: const TextStyle(color: Colors.white54),
+                        filled: true,
+                        fillColor: AppColors.slate900,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 22),
                   FilledButton(
                     onPressed: (_checkingCredentials || _showingSuccessMessage)

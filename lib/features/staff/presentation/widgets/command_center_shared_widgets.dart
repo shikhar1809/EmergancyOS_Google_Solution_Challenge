@@ -19,7 +19,7 @@ class StatusPill extends StatelessWidget {
     final color = switch (status) {
       IncidentStatus.pending => Colors.orangeAccent,
       IncidentStatus.dispatched => dispatchedAccent ?? AppColors.accentBlue,
-      IncidentStatus.blocked => Colors.grey,
+      IncidentStatus.blocked => Colors.white38,
       IncidentStatus.resolved => AppColors.primarySafe,
     };
     return Container(
@@ -101,7 +101,7 @@ Color hospitalConsignmentStatusColor(
   return switch (e.status) {
     IncidentStatus.pending => Colors.orangeAccent,
     IncidentStatus.dispatched => Colors.lightBlueAccent,
-    IncidentStatus.blocked => Colors.grey,
+    IncidentStatus.blocked => Colors.white38,
     IncidentStatus.resolved => AppColors.primarySafe,
   };
 }

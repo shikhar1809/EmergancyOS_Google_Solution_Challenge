@@ -28,11 +28,31 @@ class _MedicalDetailsScreenState extends ConsumerState<MedicalDetailsScreen> {
   final _medicationsController = TextEditingController();
   final _donorController = TextEditingController();
 
+  // New medical data fields
+  final _ageController = TextEditingController();
+  String _handicapStatus = 'None';
+  final _chronicConditionsController = TextEditingController();
+  final _insuranceProviderController = TextEditingController();
+  final _insurancePolicyController = TextEditingController();
+  final _primaryPhysicianController = TextEditingController();
+  final _primaryPhysicianPhoneController = TextEditingController();
+  final _preferredHospitalController = TextEditingController();
+  final _medicalNotesController = TextEditingController();
+
   bool _isLoading = true;
   bool _isSaving = false;
   bool _useEmergencyContactForSms = true;
   String _mapAvatarPronouns = MapAvatarPronouns.heHim;
   bool _isDirty = false;
+
+  static const List<String> handicapOptions = [
+    'None',
+    'Mobility',
+    'Hearing',
+    'Visual',
+    'Cognitive',
+    'Multiple',
+  ];
 
   @override
   void initState() {
@@ -52,6 +72,14 @@ class _MedicalDetailsScreenState extends ConsumerState<MedicalDetailsScreen> {
       _relationshipController,
       _medicationsController,
       _donorController,
+      _ageController,
+      _chronicConditionsController,
+      _insuranceProviderController,
+      _insurancePolicyController,
+      _primaryPhysicianController,
+      _primaryPhysicianPhoneController,
+      _preferredHospitalController,
+      _medicalNotesController,
     ]) {
       c.addListener(_markDirty);
     }
@@ -73,6 +101,14 @@ class _MedicalDetailsScreenState extends ConsumerState<MedicalDetailsScreen> {
       _relationshipController,
       _medicationsController,
       _donorController,
+      _ageController,
+      _chronicConditionsController,
+      _insuranceProviderController,
+      _insurancePolicyController,
+      _primaryPhysicianController,
+      _primaryPhysicianPhoneController,
+      _preferredHospitalController,
+      _medicalNotesController,
     ]) {
       c.dispose();
     }
@@ -110,6 +146,15 @@ class _MedicalDetailsScreenState extends ConsumerState<MedicalDetailsScreen> {
         _relationshipController.text = data['relationship'] ?? '';
         _medicationsController.text = data['medications'] ?? '';
         _donorController.text = data['donorStatus'] ?? '';
+        _ageController.text = data['age']?.toString() ?? '';
+        _handicapStatus = data['handicapStatus'] ?? 'None';
+        _chronicConditionsController.text = data['chronicConditions'] ?? '';
+        _insuranceProviderController.text = data['insuranceProvider'] ?? '';
+        _insurancePolicyController.text = data['insurancePolicy'] ?? '';
+        _primaryPhysicianController.text = data['primaryPhysician'] ?? '';
+        _primaryPhysicianPhoneController.text = data['primaryPhysicianPhone'] ?? '';
+        _preferredHospitalController.text = data['preferredHospital'] ?? '';
+        _medicalNotesController.text = data['medicalNotes'] ?? '';
         _useEmergencyContactForSms =
             (data['useEmergencyContactForSms'] as bool?) ?? true;
         _mapAvatarPronouns = _normalizeMapAvatarPronouns(
@@ -148,6 +193,15 @@ class _MedicalDetailsScreenState extends ConsumerState<MedicalDetailsScreen> {
             'relationship': _relationshipController.text.trim(),
             'medications': _medicationsController.text.trim(),
             'donorStatus': _donorController.text.trim(),
+            'age': int.tryParse(_ageController.text.trim()),
+            'handicapStatus': _handicapStatus,
+            'chronicConditions': _chronicConditionsController.text.trim(),
+            'insuranceProvider': _insuranceProviderController.text.trim(),
+            'insurancePolicy': _insurancePolicyController.text.trim(),
+            'primaryPhysician': _primaryPhysicianController.text.trim(),
+            'primaryPhysicianPhone': _primaryPhysicianPhoneController.text.trim(),
+            'preferredHospital': _preferredHospitalController.text.trim(),
+            'medicalNotes': _medicalNotesController.text.trim(),
             'useEmergencyContactForSms': _useEmergencyContactForSms,
             MapAvatarPronouns.fieldMapAvatarPronouns: _mapAvatarPronouns,
             'updatedAt': FieldValue.serverTimestamp(),
@@ -344,6 +398,28 @@ class _MedicalDetailsScreenState extends ConsumerState<MedicalDetailsScreen> {
                   ),
                   const SizedBox(height: 12),
                   _buildCard(
+                    icon: Icons.cake,
+                    title: 'Personal Details',
+                    children: [
+                      _buildTextField(
+                        _ageController,
+                        'Age',
+                        'Enter your age',
+                        icon: Icons.cake,
+                        keyboardType: TextInputType.number,
+                      ),
+                      const Divider(height: 1, color: Colors.white10),
+                      _buildDropdownField(
+                        'Physical Handicap Status',
+                        _handicapStatus,
+                        handicapOptions,
+                        (v) => setState(() => _handicapStatus = v ?? 'None'),
+                        icon: Icons.accessible,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildCard(
                     icon: Icons.medication,
                     title: l.profileAdditionalInfo,
                     children: [
@@ -355,10 +431,73 @@ class _MedicalDetailsScreenState extends ConsumerState<MedicalDetailsScreen> {
                       ),
                       const Divider(height: 1, color: Colors.white10),
                       _buildTextField(
+                        _chronicConditionsController,
+                        'Chronic Conditions',
+                        'Diabetes, Heart Disease, BP, Epilepsy, etc.',
+                        icon: Icons.favorite_border,
+                      ),
+                      const Divider(height: 1, color: Colors.white10),
+                      _buildTextField(
                         _donorController,
                         l.organDonor,
                         l.profileHintDonor,
                         icon: Icons.volunteer_activism,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildCard(
+                    icon: Icons.local_hospital,
+                    title: 'Healthcare Info',
+                    children: [
+                      _buildTextField(
+                        _insuranceProviderController,
+                        'Insurance Provider',
+                        'e.g., Star Health, HDFC Ergo',
+                        icon: Icons.shield,
+                      ),
+                      const Divider(height: 1, color: Colors.white10),
+                      _buildTextField(
+                        _insurancePolicyController,
+                        'Policy Number',
+                        'Enter policy number',
+                        icon: Icons.confirmation_number,
+                      ),
+                      const Divider(height: 1, color: Colors.white10),
+                      _buildTextField(
+                        _primaryPhysicianController,
+                        'Primary Physician',
+                        'Doctor name',
+                        icon: Icons.person,
+                      ),
+                      const Divider(height: 1, color: Colors.white10),
+                      _buildTextField(
+                        _primaryPhysicianPhoneController,
+                        'Physician Phone',
+                        'Doctor contact number',
+                        icon: Icons.phone,
+                        keyboardType: TextInputType.phone,
+                      ),
+                      const Divider(height: 1, color: Colors.white10),
+                      _buildTextField(
+                        _preferredHospitalController,
+                        'Preferred Hospital',
+                        'Hospital name or ID',
+                        icon: Icons.local_hospital,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildCard(
+                    icon: Icons.note,
+                    title: 'Medical Notes',
+                    children: [
+                      _buildTextField(
+                        _medicalNotesController,
+                        'Additional Medical Notes',
+                        'Any special instructions for emergency responders',
+                        icon: Icons.note,
+                        maxLines: 3,
                       ),
                     ],
                   ),
@@ -458,12 +597,14 @@ class _MedicalDetailsScreenState extends ConsumerState<MedicalDetailsScreen> {
     String hint, {
     required IconData icon,
     TextInputType? keyboardType,
+    int maxLines = 1,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: TextField(
         controller: controller,
         keyboardType: keyboardType,
+        maxLines: maxLines,
         style: const TextStyle(color: Colors.white, fontSize: 14),
         decoration: InputDecoration(
           labelText: label,
@@ -493,6 +634,42 @@ class _MedicalDetailsScreenState extends ConsumerState<MedicalDetailsScreen> {
             vertical: 12,
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildDropdownField(
+    String label,
+    String currentValue,
+    List<String> options,
+    ValueChanged<String?> onChanged, {
+    required IconData icon,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: DropdownButtonFormField<String>(
+        value: currentValue,
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(color: Colors.white54),
+          prefixIcon: Icon(icon, color: AppColors.textSecondary, size: 20),
+          filled: true,
+          fillColor: Colors.white.withValues(alpha: 0.04),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+        ),
+        dropdownColor: AppColors.surface,
+        style: const TextStyle(color: Colors.white, fontSize: 14),
+        items: options
+            .map((o) => DropdownMenuItem(value: o, child: Text(o)))
+            .toList(),
+        onChanged: onChanged,
       ),
     );
   }

@@ -40,6 +40,15 @@ class SosIncident {
   final String? bloodType;
   final String? allergies;
   final String? medicalConditions;
+  final int? victimAge;
+  final String? handicapStatus;
+  final String? chronicConditions;
+  final String? currentMedications;
+  final String? primaryPhysicianName;
+  final String? primaryPhysicianPhone;
+  final String? insuranceProvider;
+  final String? insurancePolicyNumber;
+  final String? medicalNotes;
   
   // ETA / Responder Updates
   final String? ambulanceEta;
@@ -231,6 +240,15 @@ class SosIncident {
     this.bloodType,
     this.allergies,
     this.medicalConditions,
+    this.victimAge,
+    this.handicapStatus,
+    this.chronicConditions,
+    this.currentMedications,
+    this.primaryPhysicianName,
+    this.primaryPhysicianPhone,
+    this.insuranceProvider,
+    this.insurancePolicyNumber,
+    this.medicalNotes,
     this.ambulanceEta,
     this.medicalStatus,
     this.emergencyContactPhone,
@@ -478,6 +496,15 @@ class SosIncident {
     bloodType: j['bloodType'] as String?,
     allergies: j['allergies'] as String?,
     medicalConditions: j['medicalConditions'] as String?,
+    victimAge: j['victimAge'] as int?,
+    handicapStatus: j['handicapStatus'] as String?,
+    chronicConditions: j['chronicConditions'] as String?,
+    currentMedications: j['currentMedications'] as String?,
+    primaryPhysicianName: j['primaryPhysicianName'] as String?,
+    primaryPhysicianPhone: j['primaryPhysicianPhone'] as String?,
+    insuranceProvider: j['insuranceProvider'] as String?,
+    insurancePolicyNumber: j['insurancePolicyNumber'] as String?,
+    medicalNotes: j['medicalNotes'] as String?,
     ambulanceEta: j['ambulanceEta'] as String?,
     medicalStatus: j['medicalStatus'] as String?,
     emergencyContactPhone: j['emergencyContactPhone'] as String?,

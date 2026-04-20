@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/shared_situation_brief_card.dart';
 
 /// Shown after an incident is marked resolved.
 /// Captures structured post-incident data that feeds the real leaderboard.
@@ -83,6 +84,16 @@ class _PostIncidentReportScreenState extends State<PostIncidentReportScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // AI Situation Brief — shown read-only so the responding volunteer
+              // can see the Gemini-generated debrief as part of their closing report.
+              SharedSituationBriefCard(
+                incidentId: widget.incidentId,
+                accentColor: AppColors.primarySafe,
+                compact: false,
+                showRefreshButton: false,
+              ),
+              const SizedBox(height: 4),
+
               // Header Card
               Container(
                 width: double.infinity,

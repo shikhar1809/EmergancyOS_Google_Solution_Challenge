@@ -11,7 +11,7 @@ abstract final class DemoCredentials {
   /// Master admin email for the Firebase Auth email/password account.
   static const adminEmail = String.fromEnvironment(
     'DEMO_ADMIN_EMAIL',
-    defaultValue: 'emergencyos@admin.com',
+    defaultValue: 'admin@emergencyos.com',
   );
 
   /// Master admin + medical gate password pre-fill (hospital gate uses the same field in admin UI).

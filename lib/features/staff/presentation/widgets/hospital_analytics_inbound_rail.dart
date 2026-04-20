@@ -106,9 +106,9 @@ class HospitalAnalyticsInboundRail extends StatelessWidget {
             Container(
               padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
               decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.28),
+                color: const Color(0xFF2D3A4A),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                border: Border.all(color: Colors.white24),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -143,6 +143,30 @@ class HospitalAnalyticsInboundRail extends StatelessWidget {
                             ),
                           ),
                         ),
+                      IconButton(
+                        tooltip: 'Clear inbound requests',
+                        icon: const Icon(Icons.refresh, size: 16),
+                        color: Colors.white38,
+                        onPressed: () async {
+                          // Soft-archive: mark as expired rather than deleting.
+                          // This clears the live inbound list while preserving
+                          // historical data for analytics / avg-response-time.
+                          final batch = FirebaseFirestore.instance.batch();
+                          final toExpire = await FirebaseFirestore.instance
+                              .collection('ops_incident_hospital_assignments')
+                              .where('acceptedHospitalId', isEqualTo: hid)
+                              .where('consignmentClosedAt', isNull: true)
+                              .get();
+                          final now = FieldValue.serverTimestamp();
+                          for (final d in toExpire.docs) {
+                            batch.update(d.reference, {
+                              'dispatchStatus': 'expired',
+                              'consignmentClosedAt': now,
+                            });
+                          }
+                          await batch.commit();
+                        },
+                      ),
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -180,9 +204,9 @@ class HospitalAnalyticsInboundRail extends StatelessWidget {
             Container(
               padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
               decoration: BoxDecoration(
-                color: AppColors.slate800.withValues(alpha: 0.75),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+color: const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.white24),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -250,7 +274,7 @@ class _InboundPickRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Material(
-        color: selected ? accent.withValues(alpha: 0.18) : Colors.white.withValues(alpha: 0.04),
+        color: selected ? accent.withValues(alpha: 0.25) : const Color(0xFF1E293B),
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
           onTap: onTap,

@@ -62,7 +62,7 @@ class _AdminReportsHubScreenState extends State<AdminReportsHubScreen>
           unselectedLabelColor: Colors.white54,
           tabs: [
             Tab(text: context.opsTr('Active inbound')),
-            Tab(text: context.opsTr('Completed narratives')),
+            Tab(text: context.opsTr('Archive')),
           ],
         ),
       ),
@@ -291,19 +291,6 @@ class _ReportsActiveInboundTabState extends State<_ReportsActiveInboundTab> {
                           Wrap(
                             spacing: 8,
                             children: [
-                              FilledButton.tonalIcon(
-                                onPressed: () async {
-                                  final t = IncidentReportService.buildTriageHandoffCard(inc);
-                                  await Clipboard.setData(ClipboardData(text: t));
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text(context.opsTr('Triage card copied'))),
-                                    );
-                                  }
-                                },
-                                icon: const Icon(Icons.copy, size: 16),
-                                label: Text(context.opsTr('Copy triage card')),
-                              ),
                               OutlinedButton.icon(
                                 onPressed: () async {
                                   final pin = inc.liveVictimPin;
@@ -515,6 +502,57 @@ class _ReportsCompletedTabState extends State<_ReportsCompletedTab> {
     }
   }
 
+  Widget _buildDetailField(String label, String value, {bool highlighted = false}) {
+    if (value.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: highlighted ? Colors.amber : Colors.white54,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 2),
+          SelectableText(
+            value,
+            style: TextStyle(
+              color: highlighted ? Colors.amber : Colors.white,
+              fontSize: 13,
+              fontWeight: highlighted ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusChip(String status) {
+    final isTerminated = status == 'archived' || status == 'expired';
+    final statusLabel = status == 'archived' ? 'Closed' : (status == 'expired' ? 'Expired' : status);
+    if (status.isEmpty) return const SizedBox.shrink();
+    return Chip(
+      label: Text(statusLabel, style: const TextStyle(fontSize: 10, color: Colors.white)),
+      backgroundColor: isTerminated ? Colors.red.shade900 : (status == 'resolved' ? Colors.green : Colors.orange),
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
+  String _formatDateTime(dynamic ts) {
+    if (ts == null) return '';
+    if (ts is DateTime) {
+      return DateFormat('MMM d, HH:mm').format(ts.toLocal());
+    }
+    if (ts is Timestamp) {
+      return DateFormat('MMM d, HH:mm').format(ts.toDate().toLocal());
+    }
+    return '';
+  }
+
   void _openDetail(
     BuildContext context, {
     required String incidentId,
@@ -522,24 +560,220 @@ class _ReportsCompletedTabState extends State<_ReportsCompletedTab> {
     required Map<String, dynamic> raw,
   }) {
     final shield = (raw['goodSamaritanShield'] as String?)?.trim() ?? '';
+    final emergencyType = (raw['type'] as String?)?.trim() ?? '';
+    final location = raw['location'] as Map<String, dynamic>?;
+    final lat = location?['latitude'] ?? location?['lat'];
+    final lng = location?['longitude'] ?? location?['lng'];
+    final locationStr = (lat != null && lng != null) ? '${lat.toString()}, ${lng.toString()}' : '';
+    final nearestLandmark = (raw['nearestLandmark'] as String?)?.trim() ?? '';
+    final hexZone = (raw['hexZone'] as String?)?.trim() ?? '';
+    final emsAcceptedAt = raw['emsAcceptedAt'];
+    final emsAcceptedBy = (raw['emsAcceptedBy'] as String?)?.trim() ?? '';
+    final emsOnSceneAt = raw['emsOnSceneAt'];
+    final emsHospitalArrivalAt = raw['emsHospitalArrivalAt'];
+    final returnHospitalId = (raw['returnHospitalId'] as String?)?.trim() ?? '';
+    final bloodType = (raw['bloodType'] as String?)?.trim() ?? '';
+    final allergies = (raw['allergies'] as String?)?.trim() ?? '';
+    final medicalConditions = (raw['medicalConditions'] as String?)?.trim() ?? '';
+    final victimAge = raw['victimAge'];
+    final handicapStatus = (raw['handicapStatus'] as String?)?.trim() ?? '';
+    final chronicConditions = (raw['chronicConditions'] as String?)?.trim() ?? '';
+    final currentMedications = (raw['currentMedications'] as String?)?.trim() ?? '';
+    final primaryPhysicianName = (raw['primaryPhysicianName'] as String?)?.trim() ?? '';
+    final primaryPhysicianPhone = (raw['primaryPhysicianPhone'] as String?)?.trim() ?? '';
+    final insuranceProvider = (raw['insuranceProvider'] as String?)?.trim() ?? '';
+    final insurancePolicyNumber = (raw['insurancePolicyNumber'] as String?)?.trim() ?? '';
+    final medicalNotes = (raw['medicalNotes'] as String?)?.trim() ?? '';
+    final emsRescueCompleteAt = raw['emsRescueCompleteAt'];
+    final emsReturningStartedAt = raw['emsReturningStartedAt'];
+    final emsResponseCompleteAt = raw['emsResponseCompleteAt'];
+    final status = (raw['status'] as String?)?.trim() ?? '';
+    final timestamp = raw['timestamp'];
+    final patientName = (raw['userDisplayName'] as String?)?.trim() ?? 'Unknown';
+    final ambulanceEta = (raw['ambulanceEta'] as String?)?.trim() ?? '';
+    final aiHospitalRationale = raw['aiHospitalRationale'] as Map<String, dynamic>?;
+    final hospitalName = (aiHospitalRationale?['hospitalName'] as String?)?.trim() ?? returnHospitalId;
+
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.slate800,
-        title: Text(incidentId, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(incidentId, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18)),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              children: [
+                _buildStatusChip(status),
+                if (emergencyType.isNotEmpty)
+                  Chip(
+                    label: Text(emergencyType, style: const TextStyle(fontSize: 10, color: Colors.white)),
+                    backgroundColor: Colors.red.shade700,
+                    visualDensity: VisualDensity.compact,
+                  ),
+              ],
+            ),
+          ],
+        ),
         content: SizedBox(
-          width: 520,
+          width: 560,
           child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SelectableText(
-                  narrative.isNotEmpty ? narrative : '$raw',
-                  style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('EMERGENCY DETAILS', style: TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 12),
+                      _buildDetailField('Type of Emergency', emergencyType, highlighted: true),
+                      _buildDetailField('Patient Name', patientName),
+                      _buildDetailField('Reported At', _formatDateTime(timestamp)),
+                      _buildDetailField('Report Accepted At', _formatDateTime(emsAcceptedAt)),
+                      if (emsAcceptedBy.isNotEmpty) _buildDetailField('EMS Operator (Accepted By)', emsAcceptedBy, highlighted: true),
+                      if (ambulanceEta.isNotEmpty) _buildDetailField('Ambulance ETA', ambulanceEta),
+                    ],
+                  ),
                 ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('LOCATION', style: TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 12),
+                      _buildDetailField('Coordinates', locationStr),
+                      if (nearestLandmark.isNotEmpty) _buildDetailField('Nearest Landmark', nearestLandmark),
+                      if (hexZone.isNotEmpty) _buildDetailField('Hex Zone', hexZone),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('PATIENT MEDICAL INFO', style: TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 12),
+                      _buildDetailField('Blood Type', bloodType, highlighted: true),
+                      _buildDetailField('Age', victimAge != null ? '$victimAge years' : 'Not recorded'),
+                      _buildDetailField('Allergies', allergies.isNotEmpty ? allergies : 'None recorded'),
+                      _buildDetailField('Medical Conditions', medicalConditions.isNotEmpty ? medicalConditions : 'None recorded'),
+                      _buildDetailField('Chronic Conditions', chronicConditions.isNotEmpty ? chronicConditions : 'None'),
+                      _buildDetailField('Current Medications', currentMedications.isNotEmpty ? currentMedications : 'None'),
+                      if (handicapStatus.isNotEmpty && handicapStatus != 'None')
+                        _buildDetailField('Handicap Status', handicapStatus, highlighted: true),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('EMS-HOSPITAL HANDSHAKE', style: TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 12),
+                      _buildDetailField('Hospital', hospitalName.isNotEmpty ? hospitalName : 'Not assigned', highlighted: true),
+                      _buildDetailField('EMS Accepted', _formatDateTime(emsAcceptedAt)),
+                      _buildDetailField('On-Scene At', _formatDateTime(emsOnSceneAt)),
+                      _buildDetailField('Rescue Complete', _formatDateTime(emsRescueCompleteAt)),
+                      _buildDetailField('Returning', _formatDateTime(emsReturningStartedAt)),
+                      _buildDetailField('Hospital Arrival', _formatDateTime(emsHospitalArrivalAt)),
+                      _buildDetailField('Response Complete', _formatDateTime(emsResponseCompleteAt)),
+                      if (returnHospitalId.isNotEmpty) _buildDetailField('Return Hospital ID', returnHospitalId),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('INSURANCE & PHYSICIAN', style: TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 12),
+                      _buildDetailField('Insurance Provider', insuranceProvider.isNotEmpty ? insuranceProvider : 'Not recorded'),
+                      _buildDetailField('Policy Number', insurancePolicyNumber.isNotEmpty ? insurancePolicyNumber : '—'),
+                      _buildDetailField('Primary Physician', primaryPhysicianName.isNotEmpty ? primaryPhysicianName : 'Not recorded'),
+                      _buildDetailField('Physician Phone', primaryPhysicianPhone.isNotEmpty ? primaryPhysicianPhone : '—'),
+                    ],
+                  ),
+                ),
+                if (medicalNotes.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('MEDICAL NOTES', style: TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.w800)),
+                        const SizedBox(height: 12),
+                        SelectableText(medicalNotes, style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.5)),
+                      ],
+                    ),
+                  ),
+                ],
+                if (narrative.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('NARRATIVE REPORT', style: TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.w800)),
+                        const SizedBox(height: 12),
+                        SelectableText(
+                          narrative,
+                          style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.5),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 if (shield.isNotEmpty) ...[
                   const SizedBox(height: 16),
-                  const Divider(color: Colors.white24),
                   Text(
                     context.opsTr('Good Samaritan shield'),
                     style: const TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w700),

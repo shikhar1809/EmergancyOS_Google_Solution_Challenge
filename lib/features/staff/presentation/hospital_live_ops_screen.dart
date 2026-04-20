@@ -9,8 +9,6 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/constants/app_constants.dart';
-import '../../../core/constants/google_maps_illustrative_light_style.dart';
-import '../../../core/maps/eos_hybrid_map.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/ops_map_markers.dart';
 import '../../../core/utils/osrm_route_util.dart';
@@ -336,7 +334,7 @@ class _HospitalCapacityCardState extends State<HospitalCapacityCard> {
     final r = widget.row;
     final df = DateFormat('MMM d, yyyy HH:mm');
     return Card(
-      color: AppColors.slate800,
+      color: const Color(0xFF2D3A4A),
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -353,7 +351,7 @@ class _HospitalCapacityCardState extends State<HospitalCapacityCard> {
             ),
             Text(
               '${r.region} · last update ${df.format(r.updatedAt.toLocal())}',
-              style: const TextStyle(color: Colors.white38, fontSize: 12),
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
             const SizedBox(height: 16),
             Text(context.opsTr('Bed capacity'), style: TextStyle(
@@ -469,11 +467,19 @@ class _HospitalCapacityCardState extends State<HospitalCapacityCard> {
 
   InputDecoration _capacityDeco(String hint) => InputDecoration(
         labelText: hint,
-        labelStyle: const TextStyle(color: Colors.white54),
-        hintStyle: const TextStyle(color: Colors.white30),
+        labelStyle: const TextStyle(color: Colors.white70),
+        hintStyle: const TextStyle(color: Colors.white38),
         filled: true,
-        fillColor: AppColors.slate900,
+        fillColor: const Color(0xFF4A5568),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Colors.white30),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Colors.white70),
+        ),
       );
 }
 
@@ -527,14 +533,14 @@ class HospitalOverviewCapacitySection extends StatelessWidget {
               tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               collapsedShape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
-                side: const BorderSide(color: Colors.white12),
+                side: const BorderSide(color: Colors.white24),
               ),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
-                side: const BorderSide(color: Colors.white12),
+                side: const BorderSide(color: Colors.white24),
               ),
-              backgroundColor: Colors.black.withValues(alpha: 0.45),
-              collapsedBackgroundColor: Colors.black.withValues(alpha: 0.35),
+              backgroundColor: const Color(0xFF2D3A4A),
+              collapsedBackgroundColor: const Color(0xFF1E293B),
               title: Text(context.opsTr('Hospital capacity & staffing'), style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
@@ -824,20 +830,32 @@ class _IncomingEmergencyAlerts extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (hospitalIds.isEmpty) return const SizedBox.shrink();
+    // Use a single equality filter (automatically indexed by Firestore) to find
+    // all actively incoming alerts globally, then filter for this hospital locally.
+    // This avoids needing a composite index which fails silently if missing.
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance
           .collection('ops_incident_hospital_assignments')
-          .where('notifiedHospitalId', whereIn: hospitalIds.take(10).toList())
           .where('dispatchStatus', isEqualTo: 'pending_acceptance')
-          .limit(5)
           .snapshots(),
       builder: (context, snap) {
-        if (snap.hasError || !snap.hasData) return const SizedBox.shrink();
-        final docs = snap.data!.docs;
-        if (docs.isEmpty) return const SizedBox.shrink();
+        if (snap.hasError || !snap.hasData) {
+          if (snap.hasError) debugPrint('Alerts error: ${snap.error}');
+          return const SizedBox.shrink();
+        }
+        
+        final validDocs = snap.data!.docs.where((doc) {
+          final d = doc.data();
+          // Filter locally for the hospital ID
+          final hId = (d['notifiedHospitalId'] as String?)?.trim() ?? '';
+          if (!hospitalIds.contains(hId)) return false;
+          return true;
+        }).take(5).toList();
+
+        if (validDocs.isEmpty) return const SizedBox.shrink();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: docs.map((doc) {
+          children: validDocs.map((doc) {
             return _FlashingAlertCard(
               assignmentDoc: doc,
               hospitalIds: hospitalIds,
@@ -967,17 +985,28 @@ class _FlashingAlertCardState extends State<_FlashingAlertCard>
     }
   }
 
+  String _formatLocation(dynamic loc) {
+    if (loc == null) return '—';
+    final lat = loc['latitude'] ?? loc['lat'];
+    final lng = loc['longitude'] ?? loc['lng'];
+    if (lat == null || lng == null) return '—';
+    return '${lat.toString().substring(0, lat.toString().indexOf('.') + 6)}, ${lng.toString().substring(0, lng.toString().indexOf('.') + 6)}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final d = widget.assignmentDoc.data();
     final incId = widget.assignmentDoc.id;
-    final reqSvc =
-        (d['requiredServices'] as List?)?.map((e) => e.toString()).join(', ') ??
-            '—';
+    final reqSvc = (d['requiredServices'] as List?)?.map((e) => e.toString()).join(', ') ?? '—';
     final mins = _secondsLeft ~/ 60;
     final secs = _secondsLeft % 60;
-    final countdown =
-        '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+    final countdown = '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+    final emergencyType = (d['type'] as String?)?.trim() ?? '';
+    final location = _formatLocation(d['location']);
+    final bloodType = (d['bloodType'] as String?)?.trim() ?? '';
+    final allergies = (d['allergies'] as String?)?.trim() ?? '';
+    final medicalConditions = (d['medicalConditions'] as String?)?.trim() ?? '';
+    final emsAcceptedBy = (d['emsAcceptedBy'] as String?)?.trim() ?? '';
 
     return AnimatedBuilder(
       animation: _pulse,
@@ -990,9 +1019,9 @@ class _FlashingAlertCardState extends State<_FlashingAlertCard>
         return Container(
           margin: const EdgeInsets.only(bottom: 12),
           decoration: BoxDecoration(
-            color: AppColors.primaryDanger.withValues(alpha: 0.08),
+            color: const Color(0xFF5C1A1A),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: borderColor, width: 2.5),
+            border: Border.all(color: borderColor, width: 3),
           ),
           padding: const EdgeInsets.all(14),
           child: child,
@@ -1037,19 +1066,61 @@ class _FlashingAlertCardState extends State<_FlashingAlertCard>
             ],
           ),
           const SizedBox(height: 10),
-          Text(
-            'Incident: ${incId.length > 20 ? '${incId.substring(0, 18)}...' : incId}',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Incident: ${incId.length > 20 ? '${incId.substring(0, 18)}...' : incId}',
+                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+                    ),
+                    if (emergencyType.isNotEmpty)
+                      Text('Type: $emergencyType', style: const TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('Location:', style: TextStyle(color: Colors.white54, fontSize: 10)),
+                  Text(location, style: const TextStyle(color: Colors.white70, fontSize: 10, fontFamily: 'monospace')),
+                ],
+              ),
+            ],
           ),
+          if (bloodType.isNotEmpty || allergies.isNotEmpty || medicalConditions.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (bloodType.isNotEmpty)
+                    Text('Blood: $bloodType', style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.w700)),
+                  if (allergies.isNotEmpty)
+                    Text('Allergies: $allergies', style: TextStyle(color: Colors.red.shade300, fontSize: 10)),
+                  if (medicalConditions.isNotEmpty)
+                    Text('Conditions: $medicalConditions', style: TextStyle(color: Colors.white70, fontSize: 10)),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 4),
           Text(
             'Required services: $reqSvc',
             style: const TextStyle(color: Colors.white70, fontSize: 11),
           ),
+          if (emsAcceptedBy.isNotEmpty)
+            Text(
+              'EMS Operator: $emsAcceptedBy',
+              style: const TextStyle(color: Colors.white54, fontSize: 10),
+            ),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -1362,25 +1433,43 @@ class _HospitalActiveConsignmentCardState
                     children: [
                       Text(
                         idShort,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
+                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 2),
                       Text(
                         _subtitleFor(context, inc),
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 11),
+                        style: const TextStyle(color: Colors.white54, fontSize: 11),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
                 ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (inc.bloodType != null && inc.bloodType!.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(4)),
+                        child: Text(inc.bloodType!, style: const TextStyle(color: Colors.amber, fontSize: 10, fontWeight: FontWeight.w700)),
+                      ),
+                    Text(
+                      '${inc.location.latitude.toStringAsFixed(4)}, ${inc.location.longitude.toStringAsFixed(4)}',
+                      style: const TextStyle(color: Colors.white38, fontSize: 9, fontFamily: 'monospace'),
+                    ),
+                  ],
+                ),
               ],
             ),
+            if (inc.allergies != null && inc.allergies!.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text('⚠️ Allergies: ${inc.allergies}', style: TextStyle(color: Colors.red.shade300, fontSize: 10, fontWeight: FontWeight.w600)),
+            ],
+            if (inc.medicalConditions != null && inc.medicalConditions!.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text('Medical: ${inc.medicalConditions}', style: const TextStyle(color: Colors.white54, fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ],
             if (emergencyActive) ...[
               const SizedBox(height: 10),
               _EmergencyBanner(
@@ -1579,6 +1668,8 @@ class _MiniConsignmentMap extends StatelessWidget {
   final List<LatLng> plannedRoute;
   final bool emergencyActive;
 
+  String _fmt(double v) => v.toStringAsFixed(5);
+
   @override
   Widget build(BuildContext context) {
     final origin = incident.plannedOriginLatLng;
@@ -1586,103 +1677,147 @@ class _MiniConsignmentMap extends StatelessWidget {
     final driver = incident.craneLiveLocation;
     final sos = incident.fleetEmergencyLatLng;
 
-    final markers = <Marker>{
-      Marker(
-        markerId: const MarkerId('scene'),
-        position: scene,
-        icon: OpsMapMarkers.sceneOr(
-            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed)),
-        anchor: const Offset(0.5, 0.5),
-      ),
-      if (origin != null)
-        Marker(
-          markerId: const MarkerId('origin'),
-          position: origin,
-          icon: OpsMapMarkers.hospitalOr(
-              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueCyan)),
-          anchor: const Offset(0.5, 0.5),
-        ),
-      if (driver != null)
-        Marker(
-          markerId: const MarkerId('driver'),
-          position: driver,
-          icon: OpsMapMarkers.ambulanceOr(
-              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed)),
-          anchor: const Offset(0.5, 0.5),
-        ),
-      if (sos != null)
-        Marker(
-          markerId: const MarkerId('sos'),
-          position: sos,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRose),
-          anchor: const Offset(0.5, 0.5),
-        ),
-    };
-
-    final polylines = <Polyline>{};
-    if (plannedRoute.length >= 2) {
-      polylines.add(Polyline(
-        polylineId: const PolylineId('planned'),
-        points: plannedRoute,
-        color: const Color(0xFF79C0FF),
-        width: 4,
-      ));
-    } else if (origin != null) {
-      polylines.add(Polyline(
-        polylineId: const PolylineId('planned_fallback'),
-        points: OsrmRouteUtil.fallbackPolyline(origin, scene),
-        color: const Color(0xFF79C0FF).withValues(alpha: 0.7),
-        width: 3,
-        patterns: [PatternItem.dash(20), PatternItem.gap(10)],
-      ));
+    // Approximate straight-line distance hospital → scene (km).
+    double? distKm;
+    if (origin != null) {
+      final dLat = (scene.latitude - origin.latitude) * 111.0;
+      final dLng = (scene.longitude - origin.longitude) *
+          111.0 *
+          (scene.latitude * 3.14159 / 180.0).abs().clamp(0.01, 1.0);
+      distKm = (dLat * dLat + dLng * dLng < 0) ? null : ((dLat * dLat + dLng * dLng) == 0 ? 0.0 : (dLat * dLat + dLng * dLng).abs().clamp(0.0, 999999.0));
+      if (distKm != null) {
+        // Pythagoras in km
+        final rawKm = origin != null
+            ? ((scene.latitude - origin.latitude) * (scene.latitude - origin.latitude) +
+                    (scene.longitude - origin.longitude) * (scene.longitude - origin.longitude))
+                .clamp(0, 999999)
+                .toDouble()
+            : 0.0;
+        distKm = rawKm > 0 ? rawKm * 111.0 : 0.0; // rough, good enough for display
+      }
     }
 
-    final circles = <Circle>{
-      Circle(
-        circleId: const CircleId('scene_200m'),
-        center: scene,
-        radius: 200,
-        fillColor: Colors.orange.withValues(alpha: 0.08),
-        strokeColor: Colors.orange.withValues(alpha: 0.4),
-        strokeWidth: 1,
+    Widget _pin(Color bg, IconData icon, String label) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 16,
+              height: 16,
+              decoration: BoxDecoration(
+                color: bg,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 1.5),
+              ),
+              child: Icon(icon, color: Colors.white, size: 9),
+            ),
+            const SizedBox(width: 5),
+            Text(label,
+                style:
+                    const TextStyle(color: Colors.white70, fontSize: 10)),
+          ],
+        );
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D1B2A),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: emergencyActive
+              ? Colors.redAccent.withValues(alpha: 0.55)
+              : Colors.white.withValues(alpha: 0.08),
+        ),
       ),
-      if (emergencyActive && (sos ?? driver) != null)
-        Circle(
-          circleId: const CircleId('sos_pulse'),
-          center: (sos ?? driver)!,
-          radius: 120,
-          fillColor: Colors.redAccent.withValues(alpha: 0.15),
-          strokeColor: Colors.redAccent,
-          strokeWidth: 2,
-        ),
-    };
-
-    final cameraTarget = origin != null
-        ? LatLng(
-            (origin.latitude + scene.latitude) / 2,
-            (origin.longitude + scene.longitude) / 2,
-          )
-        : scene;
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: SizedBox(
-        height: 160,
-        child: EosHybridMap(
-          initialCameraPosition: CameraPosition(
-            target: cameraTarget,
-            zoom: 12.5,
+      padding: const EdgeInsets.all(10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Route header ─────────────────────────────────────────────
+          Row(
+            children: [
+              const Icon(Icons.route_rounded,
+                  size: 14, color: Color(0xFF79C0FF)),
+              const SizedBox(width: 6),
+              const Text(
+                'ROUTE',
+                style: TextStyle(
+                  color: Color(0xFF79C0FF),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const Spacer(),
+              if (plannedRoute.length >= 2)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF79C0FF).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Text(
+                    '${plannedRoute.length} pts',
+                    style: const TextStyle(
+                        color: Color(0xFF79C0FF),
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700),
+                  ),
+                ),
+            ],
           ),
-          markers: markers,
-          polylines: polylines,
-          circles: circles,
-          liteModeEnabled: true,
-          zoomControlsEnabled: false,
-          myLocationButtonEnabled: false,
-          compassEnabled: false,
-          mapToolbarEnabled: false,
-          style: effectiveGoogleMapsEmbeddedStyleJson(),
-        ),
+          const SizedBox(height: 8),
+
+          // ── Pin legend ───────────────────────────────────────────────
+          Wrap(
+            spacing: 10,
+            runSpacing: 6,
+            children: [
+              _pin(Colors.redAccent, Icons.personal_injury_rounded,
+                  'Scene: ${_fmt(scene.latitude)}, ${_fmt(scene.longitude)}'),
+              if (origin != null)
+                _pin(const Color(0xFF00BCD4),
+                    Icons.local_hospital_rounded,
+                    'Hospital: ${_fmt(origin.latitude)}, ${_fmt(origin.longitude)}'),
+              if (driver != null)
+                _pin(const Color(0xFF1565C0),
+                    Icons.airport_shuttle_rounded,
+                    'Unit: ${_fmt(driver.latitude)}, ${_fmt(driver.longitude)}'),
+              if (emergencyActive && sos != null)
+                _pin(Colors.pink.shade700,
+                    Icons.warning_amber_rounded,
+                    'SOS: ${_fmt(sos.latitude)}, ${_fmt(sos.longitude)}'),
+            ],
+          ),
+
+          // ── Divider + distance ───────────────────────────────────────
+          const SizedBox(height: 8),
+          Container(height: 1, color: Colors.white.withValues(alpha: 0.06)),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.straighten_rounded,
+                  size: 12, color: Colors.white38),
+              const SizedBox(width: 4),
+              Text(
+                origin != null
+                    ? 'Straight-line: approx ${((scene.latitude - origin.latitude).abs() * 111.0 + (scene.longitude - origin.longitude).abs() * 111.0).toStringAsFixed(1)} km'
+                    : 'Origin not set',
+                style:
+                    const TextStyle(color: Colors.white38, fontSize: 10),
+              ),
+              if (plannedRoute.length >= 2) ...const [
+                SizedBox(width: 8),
+                Text('·',
+                    style: TextStyle(color: Colors.white24, fontSize: 10)),
+                SizedBox(width: 8),
+              ],
+              if (plannedRoute.length >= 2)
+                const Text('OSRM route loaded',
+                    style: TextStyle(
+                        color: Color(0xFF79C0FF), fontSize: 10)),
+            ],
+          ),
+        ],
       ),
     );
   }

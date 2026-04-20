@@ -20,6 +20,7 @@ $env:PATH = "C:\Users\royal\flutter_stable\bin;" + $env:PATH
 $defines = @()
 $gmaps = $env:GOOGLE_MAPS_API_KEY
 if (-not $gmaps -and $env:MAPS_API_KEY) { $gmaps = $env:MAPS_API_KEY }
+if (-not $gmaps) { $gmaps = "AIzaSyDTd_0szhv_DKOZX5hZyaCMMpDQn-K0Xfo" }
 if ($gmaps) { $defines += "--dart-define=GOOGLE_MAPS_API_KEY=$gmaps" }
 $gemini = $env:GEMINI_API_KEY
 if ($gemini) { $defines += "--dart-define=GEMINI_API_KEY=$gemini" }

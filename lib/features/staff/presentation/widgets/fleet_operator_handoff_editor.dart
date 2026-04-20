@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../../services/fleet_operator_handoff_service.dart';
+import '../../../../services/situation_brief_service.dart';
 import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 
 const int _kMaxHandoffPhotos = 8;
@@ -228,12 +230,30 @@ class _FleetOperatorHandoffEditorSheetState extends State<_FleetOperatorHandoffE
         notesText: _notes.text.trim(),
         photoUrls: List<String>.from(_photoUrls),
       );
+
+      // Trigger Gemini to regenerate the shared situation brief now that
+      // the fleet operator's clinical handoff notes are saved to Firestore.
+      // Fire-and-forget — failures are swallowed in SituationBriefService.
+      unawaited(SituationBriefService.requestGeneration(widget.incidentId));
+
       if (mounted) {
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(context.opsTr('Handoff report saved')),
-            backgroundColor: Color(0xFF238636),
+            content: Row(
+              children: [
+                const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${context.opsTr('Handoff report saved')} — generating AI situation brief…',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: const Color(0xFF238636),
+            duration: const Duration(seconds: 4),
           ),
         );
       }

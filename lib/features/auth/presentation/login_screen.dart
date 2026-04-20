@@ -181,6 +181,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _startVictimDrill() async {
     if (_isLoading) return;
+    if (!AppConstants.demoModeEnabled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Demo mode is disabled. Please sign in with Google or phone number.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
     setState(() => _isLoading = true);
     try {
       await StaffSessionService.clearRole();
@@ -203,6 +212,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _startVolunteerDrill() async {
     if (_isLoading) return;
+    if (!AppConstants.demoModeEnabled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Demo mode is disabled. Please sign in with Google or phone number.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
     setState(() => _isLoading = true);
     try {
       await StaffSessionService.clearRole();

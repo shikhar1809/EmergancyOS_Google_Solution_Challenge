@@ -5,6 +5,11 @@
 class AppConstants {
   static const String appName = 'EmergencyOS';
 
+  /// Demo mode flag - when true, allows volunteer/officer drill login without real authentication.
+  /// Set via: --dart-define=DEMO_MODE=true
+  /// In production, this should NOT be set, forcing proper Google/Phone sign-in.
+  static const bool demoModeEnabled = bool.fromEnvironment('DEMO_MODE', defaultValue: false);
+
   /// Stable id for practice / drill flows (no real Firestore document required).
   static const String drillIncidentId = 'emergencyos_drill_session';
 
