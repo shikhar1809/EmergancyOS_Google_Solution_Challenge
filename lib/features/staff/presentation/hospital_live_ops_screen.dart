@@ -12,8 +12,10 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/ops_map_markers.dart';
 import '../../../core/utils/osrm_route_util.dart';
+import '../../../core/widgets/shared_situation_brief_card.dart';
 import '../domain/admin_panel_access.dart';
 import '../../../services/incident_service.dart';
+import '../../../services/fleet_operator_handoff_service.dart';
 import '../../../services/ops_hospital_service.dart';
 import 'package:emergency_os/core/l10n/dashboard_l10n.dart';
 import '../../../core/utils/ems_workflow_labels.dart';
@@ -1484,8 +1486,158 @@ class _HospitalActiveConsignmentCardState
               plannedRoute: _planned,
               emergencyActive: emergencyActive,
             ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _HandoffViewButton(incidentId: inc.id),
+                OutlinedButton.icon(
+                  onPressed: () => _showVictimMedicalRecord(context, inc),
+                  icon: const Icon(Icons.medical_information, size: 14, color: Colors.white70),
+                  label: const Text('Medical', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    side: const BorderSide(color: Colors.white24),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _showFleetDetails(context, inc),
+                  icon: const Icon(Icons.directions_car_rounded, size: 14, color: Colors.white70),
+                  label: const Text('Fleet', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    side: const BorderSide(color: Colors.white24),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _showSituationBrief(context, inc.id),
+                  icon: const Icon(Icons.summarize_rounded, size: 14, color: Colors.white70),
+                  label: const Text('Brief', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    side: const BorderSide(color: Colors.white24),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            _LiveOpsVolunteerSceneSection(incidentId: inc.id),
+            const SizedBox(height: 8),
+            SharedSituationBriefCard(incidentId: inc.id, compact: true, showRefreshButton: false),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showVictimMedicalRecord(BuildContext context, SosIncident inc) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.slate900,
+        title: const Text('Victim Medical Record', style: TextStyle(color: Colors.white)),
+        content: SizedBox(
+          width: 350,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _infoRow('Name', inc.userDisplayName ?? 'Unknown'),
+                _infoRow('Blood Type', inc.bloodType ?? 'Not recorded'),
+                _infoRow('Allergies', inc.allergies ?? 'None'),
+                _infoRow('Medical Conditions', inc.medicalConditions ?? 'None'),
+                _infoRow('Emergency Contact', inc.emergencyContactPhone ?? 'None'),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showFleetDetails(BuildContext context, SosIncident inc) {
+    if (inc.emsAcceptedBy == null || inc.emsAcceptedBy!.isEmpty) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.slate900,
+          title: const Text('Fleet Details', style: TextStyle(color: Colors.white)),
+          content: const Text('No fleet operator assigned yet.', style: TextStyle(color: Colors.white70)),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+        ),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.slate900,
+        title: const Text('Fleet Details', style: TextStyle(color: Colors.white)),
+        content: SizedBox(
+          width: 350,
+          child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+            stream: FirebaseFirestore.instance.collection('ops_fleet_units').doc(inc.emsAcceptedBy).snapshots(),
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final data = snap.data?.data() ?? {};
+              return SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _infoRow('Call Sign', (data['fleetCallSign'] as String?) ?? 'Unknown'),
+                    _infoRow('Vehicle Type', (data['vehicleType'] as String?) ?? 'Unknown'),
+                    _infoRow('Phone', (data['phoneNumber'] as String?) ?? (data['phone'] as String?) ?? 'N/A'),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  void _showSituationBrief(BuildContext context, String incidentId) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.slate900,
+        title: const Text('Situation Brief', style: TextStyle(color: Colors.white)),
+        content: SizedBox(
+          width: 400,
+          height: 350,
+          child: SharedSituationBriefCard(incidentId: incidentId),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(label, style: const TextStyle(color: Colors.white38, fontSize: 12)),
+          ),
+          Expanded(child: Text(value, style: const TextStyle(color: Colors.white70, fontSize: 12))),
+        ],
       ),
     );
   }
@@ -1495,6 +1647,105 @@ class _HospitalActiveConsignmentCardState
         context, inc.emsWorkflowPhase ?? '');
     final type = inc.type.trim();
     return type.isEmpty ? ph : '$ph · $type';
+  }
+}
+
+class _HandoffViewButton extends StatelessWidget {
+  const _HandoffViewButton({required this.incidentId});
+
+  final String incidentId;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: () => _showHandoffDialog(context),
+      icon: const Icon(Icons.local_hospital_rounded, size: 14, color: Colors.white70),
+      label: const Text('EMS', style: TextStyle(color: Colors.white70, fontSize: 11)),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        side: const BorderSide(color: Colors.white24),
+      ),
+    );
+  }
+
+  void _showHandoffDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.slate900,
+        title: const Text('EMS Handoff Report', style: TextStyle(color: Colors.white)),
+        content: SizedBox(
+          width: 400,
+          height: 300,
+          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: FirebaseFirestore.instance
+                .collection('sos_incidents')
+                .doc(incidentId)
+                .collection('fleet_operator_handoff')
+                .limit(1)
+                .snapshots(),
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final docs = snap.data?.docs ?? [];
+              if (docs.isEmpty) {
+                return const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.hourglass_empty, color: Colors.white38, size: 48),
+                      SizedBox(height: 12),
+                      Text(
+                        'Waiting for fleet operator to submit handoff...',
+                        style: TextStyle(color: Colors.white54),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              final data = docs.first.data() ?? {};
+              final notesText = (data['notesText'] as String?) ?? '';
+              final v2Data = (data['v2Data'] as Map<String, dynamic>?) ?? {};
+
+              return SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (notesText.isNotEmpty)
+                      Text(notesText, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    if (v2Data.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      ...v2Data.entries.map((e) {
+                        if (e.value == null || e.value.toString().isEmpty) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SizedBox(
+                                width: 100,
+                                child: Text('${e.key}:',
+                                    style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                              ),
+                              Expanded(
+                                child: Text(e.value.toString(),
+                                    style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+      ),
+    );
   }
 }
 
@@ -1936,5 +2187,128 @@ class _AcceptedConsignmentSection extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+class _LiveOpsVolunteerSceneSection extends StatelessWidget {
+  const _LiveOpsVolunteerSceneSection({required this.incidentId});
+
+  final String incidentId;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('sos_incidents').doc(incidentId).snapshots(),
+      builder: (context, snap) {
+        return Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: AppColors.slate800,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.checklist_rounded, color: Colors.white38, size: 12),
+                  const SizedBox(width: 6),
+                  const Text('── VOLUNTEER SCENE REPORT ──', style: TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+                ],
+              ),
+              const SizedBox(height: 6),
+              if (snap.connectionState == ConnectionState.waiting)
+                const Row(
+                  children: [
+                    SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24)),
+                    SizedBox(width: 8),
+                    Text('Loading...', style: TextStyle(color: Colors.white38, fontSize: 10)),
+                  ],
+                )
+              else
+                _buildReportContent(snap),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildReportContent(AsyncSnapshot<DocumentSnapshot<Map<String, dynamic>>> snap) {
+    final report = (snap.data?.data()?['volunteerSceneReport'] as Map<String, dynamic>?) ?? {};
+
+    if (report.isEmpty) {
+      return const Row(
+        children: [
+          SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24)),
+          SizedBox(width: 8),
+          Text('Waiting for volunteer on-scene checklist...', style: TextStyle(color: Colors.white38, fontSize: 10)),
+        ],
+      );
+    }
+
+    final emergencyType = (report['emergencyType'] as String?) ?? '';
+    final isBleeding = report['isBleeding'];
+    final isTrapped = report['isTrapped'];
+    final isConscious = report['isConscious'];
+    final breathingStatus = (report['breathingStatus'] as String?) ?? '—';
+    final notes = (report['incidentDescription'] as String?) ?? '';
+    final photos = (report['photoPaths'] as List?)?.cast<String>() ?? [];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (emergencyType.isNotEmpty)
+          Row(
+            children: [
+              const Icon(Icons.emergency_rounded, color: Colors.amberAccent, size: 12),
+              const SizedBox(width: 6),
+              Text(
+                emergencyType,
+                style: const TextStyle(color: Colors.amberAccent, fontSize: 11, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 6,
+          runSpacing: 4,
+          children: [
+            _miniChip('Bleeding', _b(isBleeding)),
+            _miniChip('Trapped', _b(isTrapped)),
+            _miniChip('Conscious', _b(isConscious)),
+            _miniChip('Breathing', breathingStatus),
+          ],
+        ),
+        if (notes.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(notes, style: const TextStyle(color: Colors.white54, fontSize: 10), maxLines: 2, overflow: TextOverflow.ellipsis),
+        ],
+        if (photos.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text('Photos: ${photos.length} uploaded', style: const TextStyle(color: Colors.amberAccent, fontSize: 10)),
+        ],
+      ],
+    );
+  }
+
+  Widget _miniChip(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        '$label: $value',
+        style: const TextStyle(color: Colors.white54, fontSize: 9),
+      ),
+    );
+  }
+
+  String _b(dynamic v) {
+    if (v == null) return '—';
+    if (v is bool) return v ? 'Yes' : 'No';
+    return v.toString();
   }
 }

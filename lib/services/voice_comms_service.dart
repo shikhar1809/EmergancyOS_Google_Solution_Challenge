@@ -24,6 +24,13 @@ class VoiceCommsService {
   /// When true, all TTS is suppressed (user chose Silence Mode on the voice gate).
   static bool silenceMode = false;
 
+  /// When true, voice guidance is enabled - must be explicitly set by user in settings.
+  static bool voiceGuidanceEnabled = false;
+
+  /// For tracking "Volunteer accepted" to prevent repeated alerts.
+  static DateTime? _lastVolunteerAcceptedAlert;
+  static bool _hasPlayedVolunteerAccepted = false;
+
   static final List<_VoiceQueueItem> _queue = [];
   static Timer? _stuckTimer;
   static bool _draining = false;
@@ -303,15 +310,25 @@ class VoiceCommsService {
   /// Speaks [text] on this device (queued). This is the **only** voice comms path.
   static Future<void> readAloud(String text) async {
     final t = text.trim();
-    if (t.isEmpty || silenceMode) return;
+    if (t.isEmpty || silenceMode || !voiceGuidanceEnabled) return;
+    
+    // Fix: Don't repeat "Volunteer accepted" alerts within 10 seconds
+    if (_hasPlayedVolunteerAccepted && _lastVolunteerAcceptedAlert != null) {
+      final secondsSince = DateTime.now().difference(_lastVolunteerAcceptedAlert!).inSeconds;
+      if (secondsSince < 10) return;
+      _hasPlayedVolunteerAccepted = false;
+    }
+    
     // Web: any await before speechSynthesis breaks user-activation — use sync enqueue.
     if (kIsWeb) {
       readAloudImmediate(t);
       return;
     }
     final locale = await getLocale();
-    final localized = _translate(t, locale);
-    final bcp47 = _bcp47ForSpokenText(localized, locale);
+    final isHindi = locale == 'hi';
+    final fallback = isHindi ? locale : 'en';
+    final localized = _translate(t, fallback);
+    final bcp47 = _bcp47ForSpokenText(localized, fallback);
     _enqueueSpeak(localized, bcp47, null);
   }
 

@@ -190,16 +190,16 @@ class _AdminFleetManagementScreenState extends State<AdminFleetManagementScreen>
     final Color badgeBorder;
     final Color badgeBg;
     final Color badgeFg;
-    if (staffed) {
+    if (onRun) {
+      badgeLabel = 'ASSIGNED';
+      badgeBorder = Colors.orange;
+      badgeBg = Colors.orange.withValues(alpha: 0.2);
+      badgeFg = Colors.orangeAccent;
+    } else if (staffed) {
       badgeLabel = 'AVAILABLE';
       badgeBorder = Colors.green;
       badgeBg = Colors.green.withValues(alpha: 0.2);
       badgeFg = Colors.greenAccent;
-    } else if (onRun) {
-      badgeLabel = 'DISPATCHED';
-      badgeBorder = Colors.orange;
-      badgeBg = Colors.orange.withValues(alpha: 0.2);
-      badgeFg = Colors.orangeAccent;
     } else if (placeholder) {
       badgeLabel = 'NO OPERATOR';
       badgeBorder = Colors.white38;
@@ -212,7 +212,7 @@ class _AdminFleetManagementScreenState extends State<AdminFleetManagementScreen>
       badgeFg = Colors.orangeAccent;
     }
 
-    final highlightStandby = staffed;
+    final highlightStandby = staffed && !onRun;
 
     return Container(
       width: 380,

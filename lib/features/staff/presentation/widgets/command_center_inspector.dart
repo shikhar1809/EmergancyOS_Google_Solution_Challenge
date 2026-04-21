@@ -1364,13 +1364,12 @@ class _CommandCenterInspectorState extends State<CommandCenterInspector> {
                           }
                         },
                         icon: const Icon(Icons.description, size: 16),
-                        label: Text(context.opsTr('Generate report'), style: TextStyle(fontSize: 11)),
+                        label: Text(context.opsTr('Generate full report'), style: TextStyle(fontSize: 11)),
                       ),
                     ),
                   ],
                 ),
               ],
-            ),
             ),
           ),
           if (inc.liveReportPhase != null && inc.liveReportPhase! > 0) ...[

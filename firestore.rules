@@ -216,6 +216,17 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── Fleet operator handoff reports: operator writes their own doc ─────────
+    match /sos_incidents/{incidentId}/fleet_operator_handoff/{docId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null
+        && request.auth.uid == docId
+        && request.resource.data.keys().hasOnly([
+          'notesText', 'photoUrls', 'v2Data', 'updatedAt', 'operatorUid'
+        ]);
+      allow delete: if false;
+    }
+
     // ── Incident archive: CF + privileged client closure (hospital dashboard / master).
     match /sos_incidents_archive/{id} {
       allow read:  if request.auth != null;

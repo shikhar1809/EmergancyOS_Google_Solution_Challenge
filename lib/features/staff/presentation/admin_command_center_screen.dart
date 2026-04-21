@@ -11,6 +11,7 @@ import '../../../core/maps/ops_map_controller.dart';
 import '../../../core/config/build_config.dart';
 import '../../../core/constants/india_ops_zones.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/shared_situation_brief_card.dart';
 import '../../../features/map/domain/emergency_zone_classification.dart';
 import '../../../core/utils/dispatch_incident_priority.dart';
 import '../../../core/utils/fleet_unit_availability.dart';
@@ -1324,11 +1325,35 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
             ),
           ),
           const Divider(height: 1, color: Colors.white12),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('── FLEET OPERATOR ──', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+                const SizedBox(height: 6),
+                _OverviewFleetLiveView(operatorUid: sel.emsAcceptedBy),
+                const SizedBox(height: 12),
+                const Text('── EMS HANDOFF REPORT ──', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+                const SizedBox(height: 6),
+                _OverviewEmsHandoffView(incidentId: sel.id),
+                const SizedBox(height: 12),
+                const Text('── VOLUNTEER SCENE REPORT ──', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+                const SizedBox(height: 6),
+                _OverviewVolunteerSceneView(incidentId: sel.id),
+                const SizedBox(height: 12),
+                const Text('── SITUATION BRIEF (AI) ──', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+                const SizedBox(height: 6),
+                SharedSituationBriefCard(incidentId: sel.id, compact: true, showRefreshButton: true),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
           Expanded(
             child: Scrollbar(
               thumbVisibility: true,
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
                 child: CommandCenterInspector(
                   incident: sel,
                   opsZone: zone,
@@ -3353,3 +3378,265 @@ class _AdminCommandCenterScreenState extends State<AdminCommandCenterScreen>
 }
 
 enum TimeWin { h1, h24, d7, all }
+
+class _OverviewFleetLiveView extends StatelessWidget {
+  const _OverviewFleetLiveView({this.operatorUid});
+
+  final String? operatorUid;
+
+  @override
+  Widget build(BuildContext context) {
+    if (operatorUid == null || operatorUid!.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(color: AppColors.slate800, borderRadius: BorderRadius.circular(6)),
+        child: const Row(
+          children: [
+            SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24)),
+            SizedBox(width: 8),
+            Text('Waiting for fleet operator assignment...', style: TextStyle(color: Colors.white38, fontSize: 11)),
+          ],
+        ),
+      );
+    }
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('ops_fleet_units').doc(operatorUid).snapshots(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: AppColors.slate800, borderRadius: BorderRadius.circular(6)),
+            child: const Row(
+              children: [
+                SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24)),
+                SizedBox(width: 8),
+                Text('Loading fleet data...', style: TextStyle(color: Colors.white38, fontSize: 11)),
+              ],
+            ),
+          );
+        }
+
+        final data = snap.data?.data() ?? {};
+        if (data.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: AppColors.slate800, borderRadius: BorderRadius.circular(6)),
+            child: const Text('Fleet operator assigned', style: TextStyle(color: Colors.white70, fontSize: 11)),
+          );
+        }
+
+        return Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(color: AppColors.slate800, borderRadius: BorderRadius.circular(6)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.directions_car_rounded, color: Color(0xFF7EE787), size: 12),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Call Sign: ${(data['fleetCallSign'] as String?) ?? '—'}',
+                    style: const TextStyle(color: Color(0xFF7EE787), fontSize: 11, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Vehicle: ${(data['vehicleType'] as String?) ?? '—'} · Driver: ${(data['displayName'] as String?) ?? (data['name'] as String?) ?? '—'}',
+                style: const TextStyle(color: Colors.white54, fontSize: 10),
+              ),
+              Text(
+                'Phone: ${(data['phoneNumber'] as String?) ?? (data['phone'] as String?) ?? '—'}',
+                style: const TextStyle(color: Colors.white38, fontSize: 10),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _OverviewEmsHandoffView extends StatelessWidget {
+  const _OverviewEmsHandoffView({required this.incidentId});
+
+  final String incidentId;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('sos_incidents')
+          .doc(incidentId)
+          .collection('fleet_operator_handoff')
+          .limit(1)
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: AppColors.slate800, borderRadius: BorderRadius.circular(6)),
+            child: const Row(
+              children: [
+                SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24)),
+                SizedBox(width: 8),
+                Text('Loading handoff report...', style: TextStyle(color: Colors.white38, fontSize: 11)),
+              ],
+            ),
+          );
+        }
+
+        final docs = snap.data?.docs ?? [];
+        if (docs.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: AppColors.slate800, borderRadius: BorderRadius.circular(6)),
+            child: const Row(
+              children: [
+                SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24)),
+                SizedBox(width: 8),
+                Text('Waiting for EMS handoff report from fleet operator...', style: TextStyle(color: Colors.white38, fontSize: 11)),
+              ],
+            ),
+          );
+        }
+
+        final data = docs.first.data() ?? {};
+        final v2Data = (data['v2Data'] as Map<String, dynamic>?) ?? {};
+
+        return Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(color: AppColors.slate800, borderRadius: BorderRadius.circular(6)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.local_hospital_rounded, color: Color(0xFF7EE787), size: 12),
+                  const SizedBox(width: 6),
+                  const Text('Handoff Report Submitted', style: TextStyle(color: Color(0xFF7EE787), fontSize: 11, fontWeight: FontWeight.w600)),
+                ],
+              ),
+              if (v2Data.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                ...v2Data.entries.take(6).map((e) {
+                  if (e.value == null || e.value.toString().isEmpty) return const SizedBox.shrink();
+                  return Text(
+                    '${e.key}: ${e.value}',
+                    style: const TextStyle(color: Colors.white54, fontSize: 10),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  );
+                }),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _OverviewVolunteerSceneView extends StatelessWidget {
+  const _OverviewVolunteerSceneView({required this.incidentId});
+
+  final String incidentId;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('sos_incidents').doc(incidentId).snapshots(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: AppColors.slate800, borderRadius: BorderRadius.circular(6)),
+            child: const Row(
+              children: [
+                SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24)),
+                SizedBox(width: 8),
+                Text('Loading volunteer report...', style: TextStyle(color: Colors.white38, fontSize: 11)),
+              ],
+            ),
+          );
+        }
+
+        final report = (snap.data?.data()?['volunteerSceneReport'] as Map<String, dynamic>?) ?? {};
+
+        if (report.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: AppColors.slate800, borderRadius: BorderRadius.circular(6)),
+            child: const Row(
+              children: [
+                SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24)),
+                SizedBox(width: 8),
+                Text('Waiting for volunteer on-scene checklist...', style: TextStyle(color: Colors.white38, fontSize: 11)),
+              ],
+            ),
+          );
+        }
+
+        final emergencyType = (report['emergencyType'] as String?) ?? '';
+        final isBleeding = report['isBleeding'];
+        final isTrapped = report['isTrapped'];
+        final isConscious = report['isConscious'];
+        final breathingStatus = (report['breathingStatus'] as String?) ?? '—';
+
+        return Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(color: AppColors.slate800, borderRadius: BorderRadius.circular(6)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (emergencyType.isNotEmpty) ...[
+                Row(
+                  children: [
+                    const Icon(Icons.emergency_rounded, color: Colors.amberAccent, size: 12),
+                    const SizedBox(width: 6),
+                    Text(
+                      emergencyType,
+                      style: const TextStyle(color: Colors.amberAccent, fontSize: 11, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+              ],
+              Row(
+                children: [
+                  _miniChip('Bleeding', _b(isBleeding)),
+                  _miniChip('Trapped', _b(isTrapped)),
+                  _miniChip('Conscious', _b(isConscious)),
+                  _miniChip('Breathing', breathingStatus),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _miniChip(String label, String value) {
+    return Container(
+      margin: const EdgeInsets.only(right: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        '$label: $value',
+        style: const TextStyle(color: Colors.white54, fontSize: 9),
+      ),
+    );
+  }
+
+  String _b(dynamic v) {
+    if (v == null) return '—';
+    if (v is bool) return v ? 'Yes' : 'No';
+    return v.toString();
+  }
+}

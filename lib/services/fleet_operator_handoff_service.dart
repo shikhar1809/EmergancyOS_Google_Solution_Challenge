@@ -8,11 +8,13 @@ class FleetOperatorHandoffDraft {
   const FleetOperatorHandoffDraft({
     required this.notesText,
     required this.photoUrls,
+    this.v2Data = const {},
     this.updatedAt,
   });
 
   final String notesText;
   final List<String> photoUrls;
+  final Map<String, dynamic> v2Data;
   final DateTime? updatedAt;
 
   factory FleetOperatorHandoffDraft.fromFirestore(DocumentSnapshot<Map<String, dynamic>> snap) {
@@ -28,6 +30,7 @@ class FleetOperatorHandoffDraft {
     return FleetOperatorHandoffDraft(
       notesText: (d['notesText'] as String?)?.trim() ?? '',
       photoUrls: list,
+      v2Data: (d['v2Data'] as Map<String, dynamic>?) ?? {},
       updatedAt: t is Timestamp ? t.toDate() : null,
     );
   }
@@ -62,18 +65,21 @@ abstract final class FleetOperatorHandoffService {
     String operatorUid, {
     required String notesText,
     required List<String> photoUrls,
+    Map<String, dynamic>? v2Data,
   }) async {
     final id = incidentId.trim();
     final uid = operatorUid.trim();
-    if (id.isEmpty || uid.isEmpty) return;
+    if (id.isEmpty || uid.isEmpty) {
+      throw ArgumentError('incidentId and operatorUid are required for handoff save');
+    }
     await _ref(id, uid).set(
       {
         'notesText': notesText,
         'photoUrls': photoUrls,
+        if (v2Data != null) 'v2Data': v2Data,
         'updatedAt': FieldValue.serverTimestamp(),
         'operatorUid': uid,
       },
-      SetOptions(merge: true),
     );
   }
 

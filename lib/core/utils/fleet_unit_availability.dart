@@ -15,7 +15,7 @@ bool _updatedAtIsFresh(Map<String, dynamic> data, [DateTime? now]) {
   if (t is! Timestamp) return false;
   final ref = now ?? DateTime.now();
   final diff = ref.difference(t.toDate());
-  return !diff.isNegative && diff <= fleetUnitAvailabilityTtl;
+  return diff <= fleetUnitAvailabilityTtl;
 }
 
 /// True when the unit is live on duty (recent [updatedAt]) and may be allotted:

@@ -193,9 +193,18 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
 
   StreamSubscription? _dispatchChainSub;
   DispatchChainState? _dispatchChainState;
-  String? _lastVolVoiceHospital;
-  String? _lastVolVoicePhase;
-  String? _lastEmsVoicePhase;
+
+  // ── Static voice-phase guards ───────────────────────────────────────────
+  // Static so they survive widget rebuilds and prevent duplicate announcements.
+  static String? _lastVolVoiceHospital;
+  static String? _lastVolVoicePhase;
+  static String? _lastEmsVoicePhase;
+  /// Tracks which incident the static guards belong to. When a new incident
+  /// opens, the guards are reset so the first announcement plays correctly.
+  static String? _activeIncidentIdForVoice;
+  /// True once the user has chosen Audio/Silent in the voice mode dialog.
+  /// All TTS calls are suppressed until this is true.
+  bool _voiceModeReady = false;
 
   // True GeoJSON Road Paths
   List<LatLng> _hospRoute = [];
@@ -241,6 +250,15 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
     _trackingController = AnimationController(vsync: this, duration: const Duration(seconds: 90));
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _syncConsignmentMapMotion());
+
+    // Reset static voice guards when opening a new incident so the first
+    // announcement always plays correctly for the new consignment.
+    if (_activeIncidentIdForVoice != widget.incidentId) {
+      _activeIncidentIdForVoice = widget.incidentId;
+      _lastVolVoiceHospital = null;
+      _lastVolVoicePhase = null;
+      _lastEmsVoicePhase = null;
+    }
 
     unawaited(_bootstrapConsignment());
 
@@ -370,7 +388,7 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
   }
 
   void _maybeEmsWorkflowVoice(Map<String, dynamic> d) {
-    if (widget.isVictim) return;
+    if (widget.isVictim || !_voiceModeReady) return;
     final phase = (d['emsWorkflowPhase'] as String?)?.trim() ?? '';
     if (phase.isEmpty) return;
     if (phase == _lastEmsVoicePhase) return;
@@ -407,6 +425,8 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
   }
 
   void _speakVolunteerDispatchUpdate(DispatchChainState state) {
+    // Do not speak until user has chosen a voice mode preference.
+    if (!_voiceModeReady) return;
     final status = state.status;
     final hospName = state.currentHospitalName;
     final tier = state.currentTier;
@@ -453,6 +473,12 @@ class _ActiveConsignmentScreenState extends ConsumerState<ActiveConsignmentScree
     if (!mounted) return;
     _loadCustomMarkers();
     await _initLocation();
+    // Mark voice mode as ready after bootstrap. The overlay always shows the
+    // voice mode dialog BEFORE navigating here, so by this point the user
+    // has already chosen audio vs silent (or dismissed). We add a small delay
+    // to ensure any pending dialog close animation has completed.
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    if (mounted) setState(() => _voiceModeReady = true);
   }
 
   Future<void> _toggleLowPowerConsignment() async {
@@ -2763,6 +2789,14 @@ class _OnSceneVolunteerPanelState extends State<_OnSceneVolunteerPanel> {
   bool _uploadingPhoto = false;
   bool _saving = false;
 
+  String _emergencyType = '';
+  bool? _isBleeding;
+  bool? _isTrapped;
+  bool? _isConscious;
+  String _breathingStatus = 'Normal';
+  bool? _sceneSafe;
+  int _victimCount = 1;
+
   @override
   void initState() {
     super.initState();
@@ -2785,6 +2819,13 @@ class _OnSceneVolunteerPanelState extends State<_OnSceneVolunteerPanel> {
       if (!mounted || m == null) return;
       setState(() {
         _incidentDescCtrl.text = (m['incidentDescription'] as String?) ?? '';
+        _emergencyType = (m['emergencyType'] as String?) ?? '';
+        _isBleeding = m['isBleeding'] as bool?;
+        _isTrapped = m['isTrapped'] as bool?;
+        _isConscious = m['isConscious'] as bool?;
+        _breathingStatus = (m['breathingStatus'] as String?) ?? 'Normal';
+        _sceneSafe = m['sceneSafe'] as bool?;
+        _victimCount = (m['victimCount'] as int?) ?? 1;
         final photos = m['photoPaths'];
         if (photos is List) {
           _photoPaths
@@ -2799,11 +2840,28 @@ class _OnSceneVolunteerPanelState extends State<_OnSceneVolunteerPanel> {
     if (widget.isDrillMode) return;
     final id = widget.incidentId.trim();
     if (id.isEmpty || !widget.isOnScene) return;
+
+    if (_emergencyType.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please select an emergency type')),
+        );
+      }
+      return;
+    }
+
     setState(() => _saving = true);
     try {
       await FirebaseFirestore.instance.collection('sos_incidents').doc(id).set(
         {
           'volunteerSceneReport': {
+            'emergencyType': _emergencyType,
+            'isBleeding': _isBleeding,
+            'isTrapped': _isTrapped,
+            'isConscious': _isConscious,
+            'breathingStatus': _breathingStatus,
+            'sceneSafe': _sceneSafe,
+            'victimCount': _victimCount,
             'incidentDescription': _incidentDescCtrl.text.trim(),
             'photoPaths': _photoPaths.take(kMaxScenePhotos).toList(),
             'updatedAt': FieldValue.serverTimestamp(),
@@ -2845,7 +2903,12 @@ class _OnSceneVolunteerPanelState extends State<_OnSceneVolunteerPanel> {
     setState(() => _uploadingPhoto = true);
     try {
       final picker = ImagePicker();
-      final picked = await picker.pickImage(source: ImageSource.camera, imageQuality: 70, maxWidth: 1280);
+      ImageSource source = ImageSource.camera;
+      final hasCamera = await picker.pickImage(source: ImageSource.camera, maxWidth: 1) != null;
+      if (!hasCamera) {
+        source = ImageSource.gallery;
+      }
+      final picked = await picker.pickImage(source: source, imageQuality: 70, maxWidth: 1280);
       if (picked == null) {
         if (mounted) setState(() => _uploadingPhoto = false);
         return;
@@ -2887,6 +2950,19 @@ class _OnSceneVolunteerPanelState extends State<_OnSceneVolunteerPanel> {
 
   @override
   Widget build(BuildContext context) {
+    const emergencyTypes = [
+      'Drowning',
+      'Electric Shock',
+      'General Medical Emergency',
+      'Road Traffic Collision',
+      'Fire/Burn Injury',
+      'Fall/Injury',
+      'Cardiac Emergency',
+      'Snake Bite',
+      'Heat Stroke',
+      'Chemical Exposure',
+    ];
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -2917,18 +2993,95 @@ class _OnSceneVolunteerPanelState extends State<_OnSceneVolunteerPanel> {
           'On-scene checklist',
           style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w900),
         ),
-        const SizedBox(height: 6),
-        const Text(
-          'Describe the incident and upload exactly three photos from the scene.',
-          style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.35),
+        const SizedBox(height: 16),
+        const Text('Emergency Type', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+          value: _emergencyType.isEmpty ? null : _emergencyType,
+          decoration: _fieldDeco('Select emergency type'),
+          dropdownColor: AppColors.surface,
+          style: const TextStyle(color: Colors.white),
+          items: emergencyTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+          onChanged: widget.isOnScene ? (v) => setState(() => _emergencyType = v ?? '') : null,
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
+        const Text('Is Victim Bleeding?', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(child: _buildYesNoBtn('Yes', _isBleeding == true, () => setState(() => _isBleeding = true))),
+            const SizedBox(width: 12),
+            Expanded(child: _buildYesNoBtn('No', _isBleeding == false, () => setState(() => _isBleeding = false))),
+          ],
+        ),
+        const SizedBox(height: 16),
+        const Text('Is Victim Trapped?', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(child: _buildYesNoBtn('Yes', _isTrapped == true, () => setState(() => _isTrapped = true))),
+            const SizedBox(width: 12),
+            Expanded(child: _buildYesNoBtn('No', _isTrapped == false, () => setState(() => _isTrapped = false))),
+          ],
+        ),
+        const SizedBox(height: 16),
+        const Text('Is Victim Conscious?', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(child: _buildYesNoBtn('Yes', _isConscious == true, () => setState(() => _isConscious = true))),
+            const SizedBox(width: 12),
+            Expanded(child: _buildYesNoBtn('No', _isConscious == false, () => setState(() => _isConscious = false))),
+          ],
+        ),
+        const SizedBox(height: 16),
+        const Text('Breathing Status', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+          value: _breathingStatus,
+          decoration: _fieldDeco('Select breathing status'),
+          dropdownColor: AppColors.surface,
+          style: const TextStyle(color: Colors.white),
+          items: ['Normal', 'Difficulty', 'Not Breathing'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+          onChanged: widget.isOnScene ? (v) => setState(() => _breathingStatus = v ?? 'Normal') : null,
+        ),
+        const SizedBox(height: 16),
+        const Text('Is Scene Safe?', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(child: _buildYesNoBtn('Yes', _sceneSafe == true, () => setState(() => _sceneSafe = true))),
+            const SizedBox(width: 12),
+            Expanded(child: _buildYesNoBtn('No', _sceneSafe == false, () => setState(() => _sceneSafe = false))),
+          ],
+        ),
+        const SizedBox(height: 16),
+        const Text('Number of Victims', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            IconButton(
+              onPressed: widget.isOnScene && _victimCount > 1 ? () => setState(() => _victimCount--) : null,
+              icon: const Icon(Icons.remove_circle_outline, color: Colors.white70),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(8)),
+              child: Text('$_victimCount', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+            ),
+            IconButton(
+              onPressed: widget.isOnScene && _victimCount < 10 ? () => setState(() => _victimCount++) : null,
+              icon: const Icon(Icons.add_circle_outline, color: Colors.white70),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
         TextField(
           controller: _incidentDescCtrl,
           style: const TextStyle(color: Colors.white),
-          maxLines: 5,
+          maxLines: 3,
           enabled: widget.isOnScene,
-          decoration: _fieldDeco('Describe the incident…'),
+          decoration: _fieldDeco('Additional notes…'),
         ),
         const SizedBox(height: 18),
         Row(
@@ -2998,18 +3151,33 @@ class _OnSceneVolunteerPanelState extends State<_OnSceneVolunteerPanel> {
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: (_saving || !widget.isOnScene) ? null : _saveSceneReport,
+            onPressed: (_saving || !widget.isOnScene || _emergencyType.isEmpty) ? null : _saveSceneReport,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primaryDanger,
-              padding: const EdgeInsets.symmetric(vertical: 14),
+              padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
             child: _saving
                 ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Text('Save checklist', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                : const Text('SUBMIT CHECKLIST', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildYesNoBtn(String label, bool selected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.primaryDanger : AppColors.background,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: selected ? AppColors.primaryDanger : Colors.white24),
+        ),
+        child: Center(child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))),
+      ),
     );
   }
 }

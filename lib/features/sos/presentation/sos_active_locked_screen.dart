@@ -1392,6 +1392,7 @@ class _SosActiveLockedScreenState extends ConsumerState<SosActiveLockedScreen> {
   /// User chose Voice-Guided mode — prime audio and start TTS sequence.
   void _onWebVoiceGateTapped() {
     VoiceCommsService.silenceMode = false;
+    VoiceCommsService.voiceGuidanceEnabled = true;
     VoiceCommsService.clearSpeakQueue();
     // Prime AudioContext + speechSynthesis inside this user-gesture handler.
     VoiceCommsService.primeForVoiceGuidance();

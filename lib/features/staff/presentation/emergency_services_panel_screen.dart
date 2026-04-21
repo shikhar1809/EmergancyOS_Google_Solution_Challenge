@@ -746,15 +746,18 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
     if (!context.mounted || !FleetOperatorSession.isOnDuty) return;
     final role = _role;
     if (role == null) return;
-    if (_locTimer != null && _locTimer!.isActive) return;
+    // NOTE: do NOT return early due to _locTimer — we must still write the
+    // availability heartbeat to Firestore even during active location sharing.
     final fleetId = FleetOperatorSession.fleetId?.trim();
     if (fleetId == null || fleetId.isEmpty) return;
+
+    // ── Determine best-effort coordinates ──────────────────────────────────
+    Position? pos;
     try {
       var perm = await Geolocator.checkPermission();
       if (perm == LocationPermission.denied) {
         perm = await Geolocator.requestPermission();
       }
-      Position? pos;
       if (perm != LocationPermission.denied && perm != LocationPermission.deniedForever) {
         try {
           pos = await Geolocator.getCurrentPosition(
@@ -765,31 +768,35 @@ class _EmergencyServicesPanelScreenState extends State<EmergencyServicesPanelScr
         }
       }
       pos ??= await Geolocator.getLastKnownPosition();
+    } catch (_) {
+      // Location entirely unavailable (e.g. web without permission) — use fallback.
+    }
 
-      if (pos == null) {
-        _cachedFleetPlaceholderRow ??= await FleetUnitService.fleetPlaceholderRowForCallSign(fleetId);
-      }
+    if (pos == null) {
+      _cachedFleetPlaceholderRow ??= await FleetUnitService.fleetPlaceholderRowForCallSign(fleetId);
+    }
 
-      double lat;
-      double lng;
-      double? headingDeg;
-      if (pos != null) {
-        headingDeg = _lastDutyPos == null ? null : _bearingDegFromPositions(_lastDutyPos!, pos);
-        _lastDutyPos = pos;
-        lat = pos.latitude;
-        lng = pos.longitude;
-      } else if (_cachedFleetPlaceholderRow != null) {
-        lat = _cachedFleetPlaceholderRow!.lat;
-        lng = _cachedFleetPlaceholderRow!.lng;
-      } else {
-        const defaultLat = 26.8467;
-        const defaultLng = 80.9462;
-        lat = defaultLat;
-        lng = defaultLng;
-      }
+    double lat;
+    double lng;
+    double? headingDeg;
+    if (pos != null) {
+      headingDeg = _lastDutyPos == null ? null : _bearingDegFromPositions(_lastDutyPos!, pos);
+      _lastDutyPos = pos;
+      lat = pos.latitude;
+      lng = pos.longitude;
+    } else if (_cachedFleetPlaceholderRow != null) {
+      lat = _cachedFleetPlaceholderRow!.lat;
+      lng = _cachedFleetPlaceholderRow!.lng;
+    } else {
+      const defaultLat = 26.8467;
+      const defaultLng = 80.9462;
+      lat = defaultLat;
+      lng = defaultLng;
+    }
 
+    // ── Always write availability heartbeat ────────────────────────────────
+    try {
       final hid = await _hospitalIdForFleetSync();
-
       await FleetUnitService.syncMyUnit(
         vehicleType: role.fleetVehicleType,
         lat: lat,

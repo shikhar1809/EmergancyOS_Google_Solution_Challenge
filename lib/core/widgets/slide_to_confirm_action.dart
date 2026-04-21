@@ -52,9 +52,7 @@ class _SlideToConfirmActionState extends State<SlideToConfirmAction> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final trackWidth = constraints.maxWidth.isFinite
-            ? constraints.maxWidth.clamp(200.0, 560.0)
-            : 320.0;
+        final trackWidth = constraints.maxWidth.clamp(320.0, 560.0);
         final maxDrag = (trackWidth - _handleSize).clamp(1.0, 10000.0);
         final accent = widget.accentColor;
 
