@@ -12,6 +12,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/ops_map_markers.dart';
 import '../../../core/utils/osrm_route_util.dart';
+import '../../../core/widgets/polling_mixin.dart';
 import '../../../core/widgets/shared_situation_brief_card.dart';
 import '../domain/admin_panel_access.dart';
 import '../../../services/incident_service.dart';
@@ -2190,52 +2191,79 @@ class _AcceptedConsignmentSection extends StatelessWidget {
   }
 }
 
-class _LiveOpsVolunteerSceneSection extends StatelessWidget {
-  const _LiveOpsVolunteerSceneSection({required this.incidentId});
+class _LiveOpsVolunteerSceneSection extends StatefulWidget {
+  const _LiveOpsVolunteerSceneSection({super.key, required this.incidentId});
 
   final String incidentId;
 
   @override
+  State<_LiveOpsVolunteerSceneSection> createState() => _LiveOpsVolunteerSceneSectionState();
+}
+
+class _LiveOpsVolunteerSceneSectionState extends State<_LiveOpsVolunteerSceneSection> with PollingMixin {
+  DocumentSnapshot<Map<String, dynamic>>? _doc;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    startPolling();
+  }
+
+  @override
+  Future<void> onPoll() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('sos_incidents')
+          .doc(widget.incidentId)
+          .get();
+      if (mounted) {
+        setState(() {
+          _doc = snap;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance.collection('sos_incidents').doc(incidentId).snapshots(),
-      builder: (context, snap) {
-        return Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: AppColors.slate800,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: AppColors.slate800,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  const Icon(Icons.checklist_rounded, color: Colors.white38, size: 12),
-                  const SizedBox(width: 6),
-                  const Text('── VOLUNTEER SCENE REPORT ──', style: TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
-                ],
-              ),
-              const SizedBox(height: 6),
-              if (snap.connectionState == ConnectionState.waiting)
-                const Row(
-                  children: [
-                    SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24)),
-                    SizedBox(width: 8),
-                    Text('Loading...', style: TextStyle(color: Colors.white38, fontSize: 10)),
-                  ],
-                )
-              else
-                _buildReportContent(snap),
+              const Icon(Icons.checklist_rounded, color: Colors.white38, size: 12),
+              const SizedBox(width: 6),
+              const Text('── VOLUNTEER SCENE REPORT ──', style: TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
             ],
           ),
-        );
-      },
+          const SizedBox(height: 6),
+          if (_loading)
+            const Row(
+              children: [
+                SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24)),
+                SizedBox(width: 8),
+                Text('Loading...', style: TextStyle(color: Colors.white38, fontSize: 10)),
+              ],
+            )
+          else
+            _buildReportContent(),
+        ],
+      ),
     );
   }
 
-  Widget _buildReportContent(AsyncSnapshot<DocumentSnapshot<Map<String, dynamic>>> snap) {
-    final report = (snap.data?.data()?['volunteerSceneReport'] as Map<String, dynamic>?) ?? {};
+  Widget _buildReportContent() {
+    final report = (_doc?.data()?['volunteerSceneReport'] as Map<String, dynamic>?) ?? {};
 
     if (report.isEmpty) {
       return const Row(

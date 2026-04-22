@@ -38,6 +38,7 @@ GoRouter buildRouter(AppVariant variant) {
     navigatorKey: appRootNavigatorKey,
     initialLocation: switch (variant) {
       AppVariant.admin => OpsAdminRoutes.masterDashboard,
+      AppVariant.hospital => OpsAdminRoutes.hospitalDashboard,
       AppVariant.fleet => '/fleet',
       AppVariant.main => '/',
     },
@@ -47,6 +48,7 @@ GoRouter buildRouter(AppVariant variant) {
         path: '/login',
         redirect: (context, state) {
           if (variant == AppVariant.admin) return OpsAdminRoutes.masterDashboard;
+          if (variant == AppVariant.hospital) return OpsAdminRoutes.hospitalDashboard;
           return null;
         },
         builder: (context, state) => const LoginScreen(),
@@ -63,7 +65,7 @@ GoRouter buildRouter(AppVariant variant) {
       GoRoute(
         path: OpsAdminRoutes.masterDashboard,
         redirect: (context, state) async {
-          if (variant == AppVariant.admin) return null;
+          if (variant == AppVariant.admin || variant == AppVariant.hospital) return null;
           if (FirebaseAuth.instance.currentUser == null) return '/login';
           final role = await StaffSessionService.loadRole();
           if (role != StaffConsoleRole.admin) return '/login';
@@ -76,10 +78,10 @@ GoRouter buildRouter(AppVariant variant) {
       GoRoute(
         path: OpsAdminRoutes.hospitalDashboard,
         redirect: (context, state) async {
-          if (variant == AppVariant.admin) return null;
+          if (variant == AppVariant.admin || variant == AppVariant.hospital) return null;
           if (FirebaseAuth.instance.currentUser == null) return '/login';
           final role = await StaffSessionService.loadRole();
-          if (role != StaffConsoleRole.admin) return '/login';
+          if (role != StaffConsoleRole.hospital) return '/login';
           return null;
         },
         builder: (context, state) => OpsDashboardScreen(

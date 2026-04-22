@@ -13,6 +13,9 @@
         ],
         "fleet": [
           "emergencyos-fleet"
+        ],
+        "hospital": [
+          "emergencyos-hospital"
         ]
       }
     }

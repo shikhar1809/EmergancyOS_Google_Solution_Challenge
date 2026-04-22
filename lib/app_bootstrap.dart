@@ -162,6 +162,7 @@ class EmergencyOSApp extends ConsumerWidget {
       AppVariant.main => 'EmergencyOS',
       AppVariant.admin => 'EmergencyOS · Admin',
       AppVariant.fleet => 'EmergencyOS · Fleet',
+      AppVariant.hospital => 'EmergencyOS · Hospital',
     };
 
     return MaterialApp.router(

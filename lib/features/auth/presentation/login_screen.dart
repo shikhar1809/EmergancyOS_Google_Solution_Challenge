@@ -1,3 +1,4 @@
+import 'dart:html' as html;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -157,15 +158,38 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
-  Future<void> _enterEmergencyServicesConsole() async {
+  void _enterEmergencyServicesConsole() {
     setState(() => _isLoading = true);
     try {
-      await StaffSessionService.ensureFirebaseUserForConsole();
-      await StaffSessionService.setRole(StaffConsoleRole.emergencyServices);
-      if (context.mounted) context.go('/emergency-services');
+      StaffSessionService.ensureFirebaseUserForConsole();
+      StaffSessionService.setRole(StaffConsoleRole.emergencyServices);
+      html.window.location.assign('https://emergencyos-admin.web.app');
     } catch (e) {
       _showAuthError(e);
-    } finally {
+      if (context.mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _enterHospitalConsole() {
+    setState(() => _isLoading = true);
+    try {
+      StaffSessionService.ensureFirebaseUserForConsole();
+      StaffSessionService.setRole(StaffConsoleRole.hospital);
+      html.window.location.assign('https://emergencyos-hospital.web.app');
+    } catch (e) {
+      _showAuthError(e);
+      if (context.mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _enterFleetConsole() {
+    setState(() => _isLoading = true);
+    try {
+      StaffSessionService.ensureFirebaseUserForConsole();
+      StaffSessionService.clearRole();
+      html.window.location.assign('https://emergencyos-fleet.web.app/fleet');
+    } catch (e) {
+      _showAuthError(e);
       if (context.mounted) setState(() => _isLoading = false);
     }
   }
@@ -413,6 +437,49 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                       ),
                       const SizedBox(height: 26),
+                      const Text(
+                        '── STAFF DASHBOARDS ──',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white38,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: _isLoading ? null : _enterAdminConsole,
+                              icon: const Icon(Icons.admin_panel_settings_rounded, size: 18),
+                              label: const Text('Admin'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.amber,
+                                foregroundColor: Colors.black87,
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: _isLoading ? null : _enterHospitalConsole,
+                              icon: const Icon(Icons.local_hospital_rounded, size: 18),
+                              label: const Text('Hospital'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF4CAF50),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
                       _buildDrillSection(),
                       const SizedBox(height: 28),
                       Text(
@@ -425,9 +492,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                       const SizedBox(height: 12),
                       OutlinedButton.icon(
-                        onPressed: _isLoading ? null : _enterAdminConsole,
-                        icon: const Icon(Icons.dashboard_rounded),
-                        label: Text(l.loginEmsDashboard),
+                        onPressed: _isLoading ? null : _enterEmergencyServicesConsole,
+                        icon: const Icon(Icons.medical_services_rounded),
+                        label: const Text('EMS Services'),
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           side: const BorderSide(color: Colors.amberAccent, width: 1.5),
@@ -445,6 +512,30 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           side: const BorderSide(color: Color(0xFF4FC3F7), width: 1.5),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                           foregroundColor: const Color(0xFF4FC3F7),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: _isLoading ? null : _enterHospitalConsole,
+                        icon: const Icon(Icons.local_pharmacy_rounded),
+                        label: const Text('Hospital Dashboard'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          side: const BorderSide(color: Color(0xFF81C784), width: 1.5),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          foregroundColor: const Color(0xFF81C784),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: _isLoading ? null : _enterFleetConsole,
+                        icon: const Icon(Icons.directions_car_rounded),
+                        label: const Text('Fleet Operator'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          side: const BorderSide(color: Color(0xFFFFB74D), width: 1.5),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          foregroundColor: const Color(0xFFFFB74D),
                         ),
                       ),
                     ] else if (!_otpSent) ...[
