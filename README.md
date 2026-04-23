@@ -12,7 +12,7 @@
 [![LiveKit](https://img.shields.io/badge/LiveKit-WebRTC-00C4B3)](https://livekit.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**Google Solution Challenge · 2025 Submission**
+**Google Solution Challenge · 2026 Submission**
 
 [Volunteer & Victim App](https://emergencyos-main.web.app) · [Fleet Operator App](https://emergencyos-fleet.web.app/fleet) · [Hospital Dashboard](https://emergencyos-hospital.web.app) · [Master Admin Dashboard](https://emergencyos-admin.web.app)
 
