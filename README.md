@@ -516,46 +516,13 @@ Structured scene report fed to Gemini synthesis pipeline
 
 ## Future Development Plans
 
-EmergencyOS is not a finished product — it is a foundation. The roadmap is structured across three development horizons.
+EmergencyOS is not a finished product — it is a foundation.
 
----
+### 🩺 Addition of Staff App
+A dedicated mobile app for on-call specialists and hospital staff. Hospitals will be able to push notifications directly to specific doctors — ensuring the right specialist is confirmed, paged, and in position **before the patient arrives**.
 
-### 🔵 Horizon 1 — Near Term *(0–6 months)*
-
-#### 🩺 Doctor App
-A dedicated mobile app for on-call specialists. Hospitals push targeted alerts to specific doctors — ensuring the right specialist is confirmed, paged, and in position **before the patient arrives**. Eliminates verbal handoff chains and reduces ER preparation time.
-
-#### 📡 Offline-First Core SOS Pipeline
-The SOS dispatch pipeline moves to a **local-first, sync-on-connection** model. Volunteer alerts, hospital matching scores, and incident state are cached locally and reconciled when connectivity resumes — critical for rural India where connectivity is intermittent.
-
-#### 🔔 Multi-Channel Alerting
-WhatsApp Business API and Telegram Bot integration as additional push channels alongside FCM — reaching volunteers on platforms they already monitor, increasing accept rates in low-FCM-delivery zones.
-
----
-
-### 🟡 Horizon 2 — Medium Term *(6–18 months)*
-
-#### 🔗 Government EMS API Integration
-Direct integration with state EMS control rooms and the **108 ambulance network**. EmergencyOS acts as an intelligent coordination layer on top of existing government infrastructure — unifying private and government fleets in a single dispatch view.
-
-#### 🧠 Predictive Resource Allocation
-ML models trained on historical incident density, seasonal disease data, and traffic patterns. Pre-position volunteer alerts, ambulance standby zones, and hospital capacity reserves — **before** peak demand, not during it.
-
-#### 🗣️ Full Regional Language Support
-Expand voice guidance and UI to all 22 scheduled Indian languages, starting with Tamil, Telugu, Bengali, and Marathi — removing the language barrier from emergency response across India's geographic and linguistic diversity.
-
----
-
-### 🔴 Horizon 3 — Long Term *(18+ months)*
-
-#### 🏛️ National Unified Emergency Registry
-A cross-hospital, cross-fleet, anonymised emergency data layer shared with ICMR and state health departments — enabling evidence-based policy, real-time national emergency load visibility, and resource planning at scale.
-
-#### 🛰️ Satellite Connectivity Fallback
-Integration with satellite backhaul for SOS relay in zero-connectivity zones — extending full EmergencyOS capability to remote mountain, forest, and flood-affected areas.
-
-#### 🤝 Hospital Network Partnerships
-Formal MoU framework with hospital groups to embed EmergencyOS as the standard dispatch interface — moving from coordination layer to regulated EMS backbone across India.
+### 📡 Offline-First Architecture
+The SOS dispatch pipeline will move to a **local-first, sync-on-connection** model. Volunteer alerts, hospital matching scores, and incident state will be cached locally and reconciled when connectivity resumes — critical for rural areas where connectivity is intermittent.
 
 ---
 
