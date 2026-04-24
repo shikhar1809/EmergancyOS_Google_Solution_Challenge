@@ -56,35 +56,26 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerPr
       ref.read(drillSessionDashboardDemoProvider.notifier).set(false);
       ref.read(drillVictimPracticeShellProvider.notifier).set(false);
 
-      // ── Regular-user crash recovery (preserved as-is) ─────────────────────
-      // 1. Initial local check (fast path via SharedPreferences)
-      final localSosId = await IncidentService.checkActiveSosOnStartup();
-      if (localSosId != null && localSosId.isNotEmpty) {
-        if (localSosId == AppConstants.drillIncidentId) {
-          if (context.mounted) {
-            context.go('/sos-active/${Uri.encodeComponent(localSosId)}?drill=1');
-          }
-          return;
-        }
-        if (context.mounted) context.go('/sos-active/${Uri.encodeComponent(localSosId)}');
-        return;
-      }
-
+      // ── Regular-user crash recovery ────────────────────────────────────────
+      // SECURITY: All local pref / crash-recovery checks are gated behind
+      // FirebaseAuth.currentUser so that stale SharedPreferences / IndexedDB
+      // data on web (e.g. from a previous non-incognito session) cannot route
+      // an unauthenticated user into the volunteer or SOS screens.
       if (user != null) {
-        // 3. User is signed in. Re-check for any active SOS for this user (Cross-device recovery)
-        final remoteSosId = await IncidentService.checkActiveSosOnStartup();
-        if (remoteSosId != null && remoteSosId.isNotEmpty) {
-          if (remoteSosId == AppConstants.drillIncidentId) {
+        // 1. Fast path: check SharedPreferences for an active SOS this user started.
+        final localSosId = await IncidentService.checkActiveSosOnStartup();
+        if (localSosId != null && localSosId.isNotEmpty) {
+          if (localSosId == AppConstants.drillIncidentId) {
             if (context.mounted) {
-              context.go('/sos-active/${Uri.encodeComponent(remoteSosId)}?drill=1');
+              context.go('/sos-active/${Uri.encodeComponent(localSosId)}?drill=1');
             }
             return;
           }
-          if (context.mounted) context.go('/sos-active/${Uri.encodeComponent(remoteSosId)}');
+          if (context.mounted) context.go('/sos-active/${Uri.encodeComponent(localSosId)}');
           return;
         }
 
-        // 4. Check for Active Volunteer Assignment (Volunteer Crash Recovery)
+        // 2. Check for Active Volunteer Assignment (Volunteer Crash Recovery)
         final assignment = await IncidentService.loadVolunteerAssignment();
         final volId = assignment.incidentId;
         if (volId != null && volId.isNotEmpty) {
@@ -104,7 +95,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerPr
           context.go('/dashboard');
         }
       } else {
+        // Not signed in — clear any stale local state and send to login.
         await DrillSessionPersistence.clear();
+        await IncidentService.clearVolunteerAssignment();
         if (context.mounted) {
           ref.read(drillSessionDashboardDemoProvider.notifier).set(false);
           ref.read(drillVictimPracticeShellProvider.notifier).set(false);
@@ -123,7 +116,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerPr
           if (context.mounted) context.go('/drill/dashboard');
           return;
         }
-        final sos = prefs.getString('active_sos_incident_id')?.trim();
+        // SECURITY: Only resume an active SOS if the user is actually signed in.
+        final sos = user != null ? prefs.getString('active_sos_incident_id')?.trim() : null;
         if (sos != null && sos.isNotEmpty) {
           if (sos == AppConstants.drillIncidentId) {
             if (context.mounted) context.go('/sos-active/${Uri.encodeComponent(sos)}?drill=1');
