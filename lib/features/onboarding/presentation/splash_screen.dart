@@ -50,9 +50,31 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerPr
       // Staff roles (admin panel, fleet gateway) must never auto-resume.
       // Users must authenticate every time they open the app.
       await StaffSessionService.clearRole();
+      
       // Drill sessions are also cleared on fresh launch so back-nav doesn't
-      // accidentally re-enter drill mode.
+      // accidentally re-enter drill mode. If the user was anonymous (only used for drills), sign them out.
       await DrillSessionPersistence.clear();
+      
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getString('active_sos_incident_id') == AppConstants.drillIncidentId) {
+        await prefs.remove('active_sos_incident_id');
+      }
+      if (prefs.getString(IncidentService.prefVolunteerIncidentId) == AppConstants.drillIncidentId) {
+        await IncidentService.clearVolunteerAssignment();
+      }
+      
+      if (user != null && user.isAnonymous) {
+        await FirebaseAuth.instance.signOut();
+        // Since we signed out, clear any other stale local state.
+        await IncidentService.clearVolunteerAssignment();
+        if (context.mounted) {
+          ref.read(drillSessionDashboardDemoProvider.notifier).set(false);
+          ref.read(drillVictimPracticeShellProvider.notifier).set(false);
+          context.go('/login');
+        }
+        return;
+      }
+
       ref.read(drillSessionDashboardDemoProvider.notifier).set(false);
       ref.read(drillVictimPracticeShellProvider.notifier).set(false);
 
@@ -107,8 +129,20 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerPr
     } catch (_) {
       // Prefer resuming SOS / volunteer mission from local prefs if Firestore/auth checks failed.
       try {
-        final prefs = await SharedPreferences.getInstance();
         final user = FirebaseAuth.instance.currentUser;
+        if (user != null && user.isAnonymous) {
+          await FirebaseAuth.instance.signOut();
+          await DrillSessionPersistence.clear();
+          await IncidentService.clearVolunteerAssignment();
+          if (context.mounted) {
+            ref.read(drillSessionDashboardDemoProvider.notifier).set(false);
+            ref.read(drillVictimPracticeShellProvider.notifier).set(false);
+            context.go('/login');
+          }
+          return;
+        }
+
+        final prefs = await SharedPreferences.getInstance();
         if (user != null && (prefs.getBool(DrillSessionPersistence.prefKeyActive) ?? false)) {
           final victim = prefs.getBool(DrillSessionPersistence.prefKeyVictimPractice) ?? false;
           ref.read(drillSessionDashboardDemoProvider.notifier).set(true);
