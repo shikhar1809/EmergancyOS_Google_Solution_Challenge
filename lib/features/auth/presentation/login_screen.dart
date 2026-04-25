@@ -348,6 +348,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         child: Center(child: CircularProgressIndicator(color: AppColors.primaryDanger)),
                       )
                     else ...[
+                      Text(
+                        'LOGIN TO VICTIM/VOLUNTEER APP',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white70,
+                              letterSpacing: 1.2,
+                            ),
+                      ),
+                      const SizedBox(height: 16),
                       ElevatedButton.icon(
                         onPressed: _handleGoogleSignIn,
                         icon: const Icon(Icons.g_mobiledata_rounded, size: 32),
