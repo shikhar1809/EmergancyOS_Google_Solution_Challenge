@@ -509,7 +509,7 @@ Structured scene report fed to Gemini synthesis pipeline
 | 🚑 Fleet Operator App | [emergencyos-fleet.web.app/fleet](https://emergencyos-fleet.web.app/fleet) |
 | 🏥 Hospital Dashboard | [emergencyos-hospital.web.app](https://emergencyos-hospital.web.app) |
 | 🖥️ Master Admin Dashboard | [emergencyos-admin.web.app](https://emergencyos-admin.web.app) |
-| 🎬 Demo Video | *Coming Soon* |
+| 🎬 Demo Video | [www.youtube.com/watch?v=cYgLLlut13U](https://youtu.be/cYgLLlut13U) |
 | 💬 Testimonials & Survey | [joinemergencyos.web.app](https://joinemergencyos.web.app) |
 
 ---
