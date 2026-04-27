@@ -260,20 +260,20 @@ class OpsHospitalService {
     );
   }
 
-  /// Master Management: update GPS pin only (merge; does not touch credentials).
+  /// Master Management: update GPS pin only (uses .update() so Firestore
+  /// evaluates this as an update operation — matching `allow update` for
+  /// isMasterOpsConsoleEmail(). Using .set(merge:true) was incorrectly
+  /// evaluated as a create, hitting `allow create: if false`.
   static Future<void> updateMapCoordinates({
     required String id,
     required double lat,
     required double lng,
   }) async {
-    await _db.collection(_col).doc(id.trim()).set(
-      {
-        'lat': lat,
-        'lng': lng,
-        'updatedAt': FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
-    );
+    await _db.collection(_col).doc(id.trim()).update({
+      'lat': lat,
+      'lng': lng,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   static Future<void> updateLiveOpsFull({
