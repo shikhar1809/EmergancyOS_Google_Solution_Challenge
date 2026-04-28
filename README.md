@@ -490,6 +490,8 @@ Structured scene report fed to Gemini synthesis pipeline
 
 [![▶ Watch Field Test Video](https://img.youtube.com/vi/nR2P0SCCXNQ/maxresdefault.jpg)](https://youtu.be/nR2P0SCCXNQ)
 
+### 🎬 [**▶ Watch the Full Field Test — EmergencyOS Live Demo**](https://youtu.be/nR2P0SCCXNQ)
+
 </div>
 
 | Metric | Result | Notes |
