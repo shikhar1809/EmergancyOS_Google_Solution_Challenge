@@ -490,6 +490,8 @@ Structured scene report fed to Gemini synthesis pipeline
 
 [![▶ Watch Field Test Video](https://img.youtube.com/vi/nR2P0SCCXNQ/maxresdefault.jpg)](https://youtu.be/nR2P0SCCXNQ)
 
+**WATCH THE FLIELD TEST - https://www.youtube.com/watch?v=nR2P0SCCXNQ**
+
 ### 🎬 [**▶ Watch the Full Field Test — EmergencyOS Live Demo**](https://youtu.be/nR2P0SCCXNQ)
 
 </div>
@@ -516,6 +518,7 @@ Structured scene report fed to Gemini synthesis pipeline
 | 🏥 Hospital Dashboard | [emergencyos-hospital.web.app](https://emergencyos-hospital.web.app) |
 | 🖥️ Master Admin Dashboard | [emergencyos-admin.web.app](https://emergencyos-admin.web.app) |
 | 🎬 Demo Video | [www.youtube.com/watch?v=cYgLLlut13U](https://youtu.be/cYgLLlut13U) |
+| 🎬 Field Video | [www.youtube.com/watch?v=nR2P0SCCXNQ&feature=youtu.be](https://youtu.be/nR2P0SCCXNQ)) |
 | 💬 Testimonials & Survey | [joinemergencyos.web.app](https://joinemergencyos.web.app) |
 
 ---
